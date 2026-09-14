@@ -10,8 +10,10 @@ class SyncDelta {
     this.deleted,
     this.unchanged, {
     this.reordered = 0,
+    this.referencesChanged = false,
   });
   final int reordered;
+  final bool referencesChanged;
   final int added, updated, deleted, unchanged;
   @override
   String toString() =>

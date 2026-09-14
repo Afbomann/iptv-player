@@ -8,6 +8,7 @@ import 'package:sqlite3/open.dart';
 import 'package:lumen_iptv/data/database.dart';
 import 'package:lumen_iptv/core/models.dart';
 import 'package:lumen_iptv/core/controller.dart';
+import 'package:lumen_iptv/core/security.dart';
 import 'package:lumen_iptv/data/providers.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -67,6 +68,95 @@ void main() {
     await store.saveProfile(child);
     await store.replaceItems(source, items);
   });
+  for (final kind in [SourceKind.m3u, SourceKind.file]) {
+    test(
+      '$kind migrates legacy items and invalidates orphan-only recovery once',
+      () async {
+        const playlist = '#EXTM3U\n#EXTINF:-1,Channel\nhttps://test/stream\n';
+        final providerSource = Source.fromJson({
+          ...source.toJson(),
+          'kind': kind.name,
+        });
+        final incoming = parseM3u({
+          'source': source.id,
+          'text': playlist,
+        }).single;
+        final legacyId = stableId(source.id, '|Channel|Ungrouped|/stream');
+        await store.replaceItems(providerSource, [
+          MediaItem.fromJson({...incoming.toJson(), 'id': legacyId}),
+        ]);
+        await store.setState(child.id, legacyId, favorite: true, position: 25);
+        await store.saveProfile(
+          Profile.fromJson({
+            ...child.toJson(),
+            'blockedChannels': [legacyId],
+          }),
+        );
+        await store.saveRecording({
+          'id': 'job',
+          'source': source.id,
+          'item': legacyId,
+          'status': 'scheduled',
+        });
+        final migrated = await store.replaceItems(providerSource, [incoming]);
+        expect(migrated.referencesChanged, isTrue);
+        expect((await store.state(child.id, incoming.id))['position'], 25);
+        expect((await store.recordings()).single['item'], incoming.id);
+        expect(
+          (await store.profiles())
+              .firstWhere((p) => p.id == child.id)
+              .allows(incoming),
+          isFalse,
+        );
+
+        // Simulate an earlier refresh having replaced the catalog but left references behind.
+        await store.setState(child.id, legacyId, favorite: true);
+        await store.saveProfile(
+          Profile.fromJson({
+            ...child.toJson(),
+            'blockedChannels': [legacyId],
+            'preferences': {
+              'customGroups': {
+                'Saved': [legacyId],
+              },
+            },
+          }),
+        );
+        if (kind == SourceKind.file) {
+          await store.setSetting('file:${source.id}', {
+            'encrypted': await Security.seal(playlist, store.key),
+          });
+        }
+        final app = AppController(
+          store,
+          providers: ProviderClient(
+            client: MockClient((_) async => http.Response(playlist, 200)),
+          ),
+        )..current = child;
+        addTearDown(app.dispose);
+        final revision = app.revision;
+        await app.refreshDue(force: true);
+        expect(app.refreshError, isNull);
+        expect(
+          app.refreshSummary,
+          contains('0 added · 0 changed · 0 removed · 1 unchanged'),
+        );
+        expect(app.revision, revision + 1);
+        expect(app.current!.allows(incoming), isFalse);
+        expect(app.current!.preferences['customGroups']['Saved'], [
+          incoming.id,
+        ]);
+        await app.refreshDue(force: true);
+        expect(app.revision, revision + 1);
+        expect(
+          (await store.replaceItems(providerSource, [
+            incoming,
+          ])).referencesChanged,
+          isFalse,
+        );
+      },
+    );
+  }
   test(
     'M3U identity migration preserves references and blocks all legacy variants',
     () async {

@@ -437,8 +437,9 @@ class AppController extends ChangeNotifier {
               },
             );
             libraryChanged |=
+                delta.referencesChanged ||
                 delta.added + delta.updated + delta.deleted + delta.reordered >
-                0;
+                    0;
             profiles = await store.profiles();
             final currentId = current?.id;
             if (currentId != null) {

@@ -169,7 +169,7 @@ class LibraryStore {
     await db.customStatement('DELETE FROM sources WHERE id=?', [id]);
   });
   // Runs inside the catalog transaction, before the old encrypted rows disappear.
-  Future<void> _migrateM3uReferences(
+  Future<bool> _migrateM3uReferences(
     Source source,
     List<MediaItem> items,
   ) async {
@@ -183,7 +183,7 @@ class LibraryStore {
         candidates.putIfAbsent(legacy, () => []).add(item);
       }
     }
-    if (candidates.isEmpty) return;
+    if (candidates.isEmpty) return false;
     final savedProfiles = await profiles();
     final savedJobs = await recordings();
     final referenced = <String>{
@@ -211,7 +211,11 @@ class LibraryStore {
             .substring(row.read<String>('id').indexOf(':') + 1),
     };
     candidates.removeWhere((id, _) => !referenced.contains(id));
-    if (candidates.isEmpty) return;
+    if (candidates.isEmpty) return false;
+    Future<int> changes() async =>
+        (await db.customSelect('SELECT total_changes() AS count').getSingle())
+            .read<int>('count');
+    final before = await changes();
     final old = await db
         .customSelect(
           'SELECT id,payload FROM items WHERE source=? AND id IN (SELECT value FROM json_each(?))',
@@ -302,6 +306,7 @@ class LibraryStore {
         continue;
       }
       final target = targets[job['item']];
+      final previous = jsonEncode(job);
       if (target != null) {
         job['item'] = target;
       } else if (job['status'] == 'scheduled') {
@@ -310,8 +315,9 @@ class LibraryStore {
         job['error'] =
             'Playlist identity is ambiguous. Select the intended channel and schedule this recording again.';
       }
-      await saveRecording(job);
+      if (jsonEncode(job) != previous) await saveRecording(job);
     }
+    return await changes() != before;
   }
 
   Future<SyncDelta> replaceItems(
@@ -327,8 +333,11 @@ class LibraryStore {
     )) {
       throw const FormatException('Catalog source mismatch.');
     }
-    if (source.kind == SourceKind.m3u && replace && parent == null) {
-      await _migrateM3uReferences(source, items);
+    var referencesChanged = false;
+    if ((source.kind == SourceKind.m3u || source.kind == SourceKind.file) &&
+        replace &&
+        parent == null) {
+      referencesChanged = await _migrateM3uReferences(source, items);
     }
     final result = await synchronize(
       db: db,
@@ -392,6 +401,7 @@ class LibraryStore {
       result.deleted,
       result.unchanged,
       reordered: reordered,
+      referencesChanged: referencesChanged,
     );
   });
 
