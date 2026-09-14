@@ -67,6 +67,119 @@ void main() {
     await store.saveProfile(child);
     await store.replaceItems(source, items);
   });
+  test(
+    'M3U identity migration preserves references and blocks all legacy variants',
+    () async {
+      final incoming = parseM3u({
+        'source': source.id,
+        'text':
+            '#EXTM3U\n#EXTINF:-1 tvg-id="news" group-title="TV",News\nhttps://a.test/play?id=1\n'
+            '#EXTINF:-1 tvg-id="news" group-title="TV",News\nhttps://a.test/play?id=2',
+      });
+      final legacyId = stableId(source.id, 'news|News|TV|/play');
+      final legacy = MediaItem.fromJson({
+        ...incoming.last.toJson(),
+        'id': legacyId,
+      });
+      await store.replaceItems(source, [legacy]);
+      await store.setState(
+        child.id,
+        legacyId,
+        favorite: true,
+        position: 42,
+        duration: 100,
+      );
+      await store.saveProfile(
+        Profile.fromJson({
+          ...child.toJson(),
+          'blockedChannels': [legacyId],
+          'preferences': {
+            'customGroups': {
+              'News': [legacyId],
+            },
+          },
+        }),
+      );
+      await store.setSetting('engine:$legacyId', {'engine': 'mpv'});
+      await store.setSetting('epg-map:$legacyId', {'channel': 'news'});
+      await store.saveRecording({
+        'id': 'job',
+        'source': source.id,
+        'item': legacyId,
+        'status': 'scheduled',
+      });
+      await store.replaceItems(source, incoming);
+      expect((await store.state(child.id, incoming.last.id))['favorite'], 1);
+      expect((await store.state(child.id, incoming.last.id))['position'], 42);
+      expect((await store.recordings()).single['item'], incoming.last.id);
+      final migrated = (await store.profiles()).firstWhere(
+        (p) => p.id == child.id,
+      );
+      expect(incoming.every((item) => !migrated.allows(item)), isTrue);
+      expect(
+        migrated.preferences['customGroups']['News'],
+        containsAll(incoming.map((i) => i.id)),
+      );
+      expect(await store.setting('engine:${incoming.last.id}'), {
+        'engine': 'mpv',
+      });
+      expect(await store.setting('epg-map:${incoming.last.id}'), {
+        'channel': 'news',
+      });
+      final before = await store.exportData();
+      final delta = await store.replaceItems(source, incoming);
+      expect(delta.unchanged, 2);
+      expect(await store.exportData(), before);
+    },
+  );
+
+  test(
+    'Orphaned ambiguous references fail safely and migration rolls back with refresh',
+    () async {
+      final incoming = parseM3u({
+        'source': source.id,
+        'text':
+            '#EXTM3U\n#EXTINF:-1,News\nhttps://a.test/play?id=1\n#EXTINF:-1,News\nhttps://b.test/play?id=2',
+      });
+      final legacyId = stableId(source.id, '|News|Ungrouped|/play');
+      await store.setState(child.id, legacyId, favorite: true);
+      await store.saveProfile(
+        Profile.fromJson({
+          ...child.toJson(),
+          'blockedChannels': [legacyId],
+        }),
+      );
+      await store.saveRecording({
+        'id': 'ambiguous',
+        'source': source.id,
+        'item': legacyId,
+        'status': 'scheduled',
+      });
+      await expectLater(
+        store.replaceItems(
+          source,
+          incoming,
+          onProgress: (_, _) => throw StateError('rollback'),
+        ),
+        throwsStateError,
+      );
+      expect((await store.state(child.id, legacyId))['favorite'], 1);
+      expect((await store.recordings()).single['status'], 'scheduled');
+      await store.replaceItems(source, incoming);
+      final job = (await store.recordings()).single;
+      expect(job['status'], 'failed');
+      expect(job['error'], contains('ambiguous'));
+      for (final item in incoming) {
+        expect((await store.state(child.id, item.id))['favorite'], 1);
+        expect(
+          (await store.profiles())
+              .firstWhere((p) => p.id == child.id)
+              .allows(item),
+          isFalse,
+        );
+      }
+    },
+  );
   tearDown(() async => store.db.close());
   test(
     'FTS policy filters before pagination and encrypted URLs stay out of storage',

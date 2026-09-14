@@ -8,6 +8,7 @@ import '../platform/device.dart';
 import '../core/models.dart';
 import '../core/security.dart';
 import 'sync.dart';
+import 'providers.dart' show stableId, m3uStreamIdentity;
 export 'sync.dart' show SyncDelta;
 
 class LumenDatabase extends GeneratedDatabase {
@@ -167,6 +168,152 @@ class LibraryStore {
     await db.customStatement('DELETE FROM programmes WHERE source=?', [id]);
     await db.customStatement('DELETE FROM sources WHERE id=?', [id]);
   });
+  // Runs inside the catalog transaction, before the old encrypted rows disappear.
+  Future<void> _migrateM3uReferences(
+    Source source,
+    List<MediaItem> items,
+  ) async {
+    final candidates = <String, List<MediaItem>>{};
+    for (final item in items) {
+      final legacy = stableId(
+        source.id,
+        '${item.epgId}|${item.name}|${item.group}|${Uri.parse(item.url).path}',
+      );
+      if (legacy != item.id) {
+        candidates.putIfAbsent(legacy, () => []).add(item);
+      }
+    }
+    if (candidates.isEmpty) return;
+    final savedProfiles = await profiles();
+    final savedJobs = await recordings();
+    final referenced = <String>{
+      for (final row
+          in await db
+              .customSelect('SELECT DISTINCT item FROM user_state')
+              .get())
+        row.read<String>('item'),
+      for (final profile in savedProfiles) ...profile.blockedChannels,
+      for (final profile in savedProfiles)
+        for (final members in Map<String, dynamic>.from(
+          profile.preferences['customGroups'] ?? {},
+        ).values)
+          ...List<String>.from(members),
+      for (final job in savedJobs)
+        if (job['source'] == source.id) job['item'] as String,
+      for (final row
+          in await db
+              .customSelect(
+                "SELECT id FROM settings WHERE id LIKE 'engine:%' OR id LIKE 'epg-map:%'",
+              )
+              .get())
+        row
+            .read<String>('id')
+            .substring(row.read<String>('id').indexOf(':') + 1),
+    };
+    candidates.removeWhere((id, _) => !referenced.contains(id));
+    if (candidates.isEmpty) return;
+    final old = await db
+        .customSelect(
+          'SELECT id,payload FROM items WHERE source=? AND id IN (SELECT value FROM json_each(?))',
+          variables: [
+            Variable.withString(source.id),
+            Variable.withString(jsonEncode(candidates.keys.toList())),
+          ],
+        )
+        .get();
+    final targets = <String, String>{};
+    for (final entry in candidates.entries) {
+      if (entry.value.length == 1) targets[entry.key] = entry.value.single.id;
+    }
+    for (final row in old) {
+      final item = MediaItem.fromJson(
+        decodeMap(await Security.open(row.read<String>('payload'), key)),
+      );
+      final matches = candidates[item.id]!
+          .where(
+            (candidate) =>
+                m3uStreamIdentity(Uri.parse(candidate.url)) ==
+                m3uStreamIdentity(Uri.parse(item.url)),
+          )
+          .toList();
+      if (matches.length == 1) targets[item.id] = matches.single.id;
+    }
+    // Orphaned references from an already-refreshed installation are also covered.
+    for (final entry in candidates.entries) {
+      final destinations = targets.containsKey(entry.key)
+          ? [targets[entry.key]!]
+          : entry.value.map((i) => i.id).toList();
+      for (final target in destinations) {
+        // Preserve existing destination history; merge the favorite flag.
+        await db.customStatement(
+          '''INSERT INTO user_state
+          SELECT profile,?,favorite,position,duration,watched FROM user_state WHERE item=?
+          ON CONFLICT(profile,item) DO UPDATE SET favorite=MAX(user_state.favorite,excluded.favorite)''',
+          [target, entry.key],
+        );
+        for (final prefix in ['engine:', 'epg-map:']) {
+          await db.customStatement(
+            'INSERT OR IGNORE INTO settings SELECT ?,payload FROM settings WHERE id=?',
+            ['$prefix$target', '$prefix${entry.key}'],
+          );
+        }
+      }
+      await db.customStatement('DELETE FROM user_state WHERE item=?', [
+        entry.key,
+      ]);
+      for (final prefix in ['engine:', 'epg-map:']) {
+        await db.customStatement('DELETE FROM settings WHERE id=?', [
+          '$prefix${entry.key}',
+        ]);
+      }
+    }
+    for (final profile in savedProfiles) {
+      final payload = profile.toJson();
+      // Retain the legacy block as well: variants returning on later refreshes
+      // must inherit the restriction even after the original collision is gone.
+      payload['blockedChannels'] = {
+        ...profile.blockedChannels,
+        for (final id in profile.blockedChannels)
+          ...?candidates[id]?.map((item) => item.id),
+      }.toList();
+      final preferences = Map<String, dynamic>.from(profile.preferences);
+      final groups = Map<String, dynamic>.from(
+        preferences['customGroups'] ?? {},
+      );
+      for (final name in groups.keys.toList()) {
+        groups[name] = {
+          for (final id in List<String>.from(groups[name]))
+            if (candidates.containsKey(id))
+              ...candidates[id]!.map((item) => item.id)
+            else
+              id,
+        }.toList();
+      }
+      if (preferences.containsKey('customGroups')) {
+        preferences['customGroups'] = groups;
+      }
+      payload['preferences'] = preferences;
+      if (jsonEncode(payload) != jsonEncode(profile.toJson())) {
+        await _put('profiles', profile.id, payload);
+      }
+    }
+    for (final job in savedJobs) {
+      if (job['source'] != source.id || !candidates.containsKey(job['item'])) {
+        continue;
+      }
+      final target = targets[job['item']];
+      if (target != null) {
+        job['item'] = target;
+      } else if (job['status'] == 'scheduled') {
+        // Never silently record an arbitrary channel from an unresolved collision.
+        job['status'] = 'failed';
+        job['error'] =
+            'Playlist identity is ambiguous. Select the intended channel and schedule this recording again.';
+      }
+      await saveRecording(job);
+    }
+  }
+
   Future<SyncDelta> replaceItems(
     Source source,
     List<MediaItem> items, {
@@ -179,6 +326,9 @@ class LibraryStore {
           i.sourceId != source.id || (parent != null && i.parentId != parent),
     )) {
       throw const FormatException('Catalog source mismatch.');
+    }
+    if (source.kind == SourceKind.m3u && replace && parent == null) {
+      await _migrateM3uReferences(source, items);
     }
     final result = await synchronize(
       db: db,
