@@ -7,6 +7,7 @@ import '../platform/recorder.dart';
 import '../playback/engine.dart';
 import '../playback/sessions.dart';
 import 'models.dart';
+import 'recording_conflicts.dart';
 
 class RecordingService {
   RecordingService(this.store);
@@ -51,15 +52,12 @@ class RecordingService {
     final from = start.subtract(Duration(minutes: padding));
     final until = end.add(Duration(minutes: padding));
     final jobs = await store.recordings();
-    final conflicts = jobs
-        .where(
-          (j) =>
-              j['source'] == source.id &&
-              ['scheduled', 'recording'].contains(j['status']) &&
-              j['start'] < until.millisecondsSinceEpoch &&
-              j['end'] > from.millisecondsSinceEpoch,
-        )
-        .length;
+    final conflicts = peakRecordingConcurrency(
+      jobs,
+      source.id,
+      from.millisecondsSinceEpoch,
+      until.millisecondsSinceEpoch,
+    );
     if (conflicts >= source.connectionLimit) {
       throw StateError(
         'This recording conflicts with the provider connection limit.',

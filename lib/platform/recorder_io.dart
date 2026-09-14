@@ -70,6 +70,7 @@ class StreamRecorder {
     try {
       var uri = Uri.parse(url);
       var response = await fetch(uri);
+      uri = effectiveRecordingUri(uri, response);
       final hls =
           uri.path.toLowerCase().endsWith('.m3u8') ||
           response.headers.contentType?.mimeType.toLowerCase().contains(
@@ -110,6 +111,7 @@ class StreamRecorder {
             }
             uri = uri.resolve(segments.first);
             response = await fetch(uri);
+            uri = effectiveRecordingUri(uri, response);
             continue;
           }
           for (final segment in segments) {
@@ -126,6 +128,7 @@ class StreamRecorder {
           await Future<void>.delayed(const Duration(seconds: 2));
           if (_stopped.contains(id)) break;
           response = await fetch(uri);
+          uri = effectiveRecordingUri(uri, response);
         }
       }
       if (bytes == 0) throw const FormatException('No media was received.');
@@ -153,4 +156,11 @@ class StreamRecorder {
       stop(id);
     }
   }
+}
+
+Uri effectiveRecordingUri(Uri requested, HttpClientResponse response) {
+  return response.redirects.fold(
+    requested,
+    (uri, redirect) => uri.resolveUri(redirect.location),
+  );
 }

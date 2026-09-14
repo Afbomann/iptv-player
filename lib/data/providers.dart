@@ -547,7 +547,7 @@ List<MediaItem> parseM3u(Map<String, dynamic> args) {
           ? (attributes['tvg-name'] ?? uri.pathSegments.last)
           : name;
       final epg = attributes['tvg-id'] ?? '';
-      final identity = '$epg|$channelName|$group|${uri.path}';
+      final identity = '$epg|$channelName|$group|${m3uStreamIdentity(uri)}';
       final id = stableId(source, identity);
       result[id] = MediaItem(
         id: id,
@@ -574,6 +574,34 @@ List<MediaItem> parseM3u(Map<String, dynamic> args) {
     );
   }
   return result.values.toList();
+}
+
+// Strip only recognized authentication fields, not stream selectors such as id.
+// Sort keys so query ordering changes do not invalidate favorites/history.
+String m3uStreamIdentity(Uri uri) {
+  const authentication = {
+    'username',
+    'password',
+    'token',
+    'access_token',
+    'auth_token',
+    'signature',
+    'expires',
+  };
+  final keys =
+      uri.queryParametersAll.keys
+          .where((key) => !authentication.contains(key.toLowerCase()))
+          .toList()
+        ..sort();
+  return uri
+      .replace(
+        userInfo: '',
+        fragment: '',
+        queryParameters: {
+          for (final key in keys) key: uri.queryParametersAll[key]!,
+        },
+      )
+      .toString();
 }
 
 DateTime xmltvTime(String input) {

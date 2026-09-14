@@ -42,6 +42,50 @@ void main() {
     expect(bytes.last, 2);
   });
   test(
+    'HLS resolves master and media paths after multiple redirects',
+    () async {
+      final requested = <String>[];
+      server.listen((r) async {
+        final path = r.uri.path;
+        requested.add(path);
+        final redirect = {
+          '/start': '/redirect/entry',
+          '/redirect/entry': '../cdn/master.m3u8',
+          '/cdn/variant.m3u8': '/media/live.m3u8',
+        }[path];
+        if (redirect != null) {
+          r.response.statusCode = 302;
+          r.response.headers.set('location', redirect);
+        } else if (path == '/cdn/master.m3u8') {
+          r.response.write(
+            '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nvariant.m3u8',
+          );
+        } else if (path == '/media/live.m3u8') {
+          r.response.write('#EXTM3U\n#EXTINF:1,\nsegment.ts\n#EXT-X-ENDLIST');
+        } else if (path == '/media/segment.ts') {
+          r.response.add(List.filled(188, 7));
+        } else {
+          r.response.statusCode = 404;
+        }
+        await r.response.close();
+      });
+      final path = await recorder.record(
+        id: 'redirected',
+        url: 'http://127.0.0.1:${server.port}/start',
+        end: DateTime.now().add(const Duration(minutes: 1)),
+      );
+      expect(await File(path).readAsBytes(), List.filled(188, 7));
+      expect(requested, [
+        '/start',
+        '/redirect/entry',
+        '/cdn/master.m3u8',
+        '/cdn/variant.m3u8',
+        '/media/live.m3u8',
+        '/media/segment.ts',
+      ]);
+    },
+  );
+  test(
     'Encrypted HLS is rejected even if a METHOD=NONE tag is also present',
     () async {
       server.listen((r) async {

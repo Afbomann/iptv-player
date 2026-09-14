@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -240,7 +242,17 @@ class _RecordingsPageState extends ConsumerState<RecordingsPage> {
                                     !app.current!.allows(item)) {
                                   throw StateError('Recording is restricted.');
                                 }
-                                if (!await launchUrl(Uri.file(j['path']))) {
+                                if (!kIsWeb &&
+                                    defaultTargetPlatform ==
+                                        TargetPlatform.android) {
+                                  await const MethodChannel(
+                                    'app.lumen/device',
+                                  ).invokeMethod('openRecording', {
+                                    'path': j['path'],
+                                  });
+                                } else if (!await launchUrl(
+                                  Uri.file(j['path']),
+                                )) {
                                   throw StateError(
                                     'No application could open the recording.',
                                   );

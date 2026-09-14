@@ -6,6 +6,24 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('M3U preserves host and query stream identities across auth rotation', () {
+    List<MediaItem> parse(String token) => parseM3u({
+      'source': 'source',
+      'text':
+          '#EXTM3U\n${['https://one.test/play?id=1&token=$token', 'https://one.test/play?id=2&token=$token', 'https://two.test/play?id=1&token=$token'].map((url) => '#EXTINF:-1 tvg-id="news" group-title="TV",News\n$url').join('\n')}',
+    });
+    final original = parse('old');
+    expect(original, hasLength(3));
+    expect(original.map((item) => item.id).toSet(), hasLength(3));
+    expect(
+      parse('new').map((item) => item.id),
+      original.map((item) => item.id),
+    );
+    expect(
+      m3uStreamIdentity(Uri.parse('https://one.test/play?id=1&quality=hd')),
+      m3uStreamIdentity(Uri.parse('https://one.test/play?quality=hd&id=1')),
+    );
+  });
   const xtream = Source(
     id: 'account',
     name: 'Account',

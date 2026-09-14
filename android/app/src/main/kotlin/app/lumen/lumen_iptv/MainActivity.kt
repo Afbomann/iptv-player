@@ -19,6 +19,19 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.lumen/device").setMethodCallHandler { call, result ->
             when (call.method) {
+                "openRecording" -> {
+                    try {
+                        val file = File(call.argument<String>("path") ?: "").canonicalFile
+                        val root = File(getDir("flutter", Context.MODE_PRIVATE), "Lumen/Recordings").canonicalFile
+                        require(file.path.startsWith(root.path + File.separator) && file.isFile && file.extension == "ts")
+                        val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+                        startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp2t")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                        result.success(null)
+                    } catch (error: Exception) {
+                        result.error("OPEN_FAILED", "No application could open the recording.", null)
+                    }
+                }
                 "installUpdate" -> {
                     try {
                         val file = File(call.argument<String>("path") ?: "").canonicalFile
