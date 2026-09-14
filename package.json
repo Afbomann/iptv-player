@@ -1,0 +1,16 @@
+{
+  "name": "lumen-web-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:video": "bun build tooling/video.ts --outfile web/video.js --minify --target browser",
+    "build:pairing": "bun build tooling/pairing.ts --outfile assets/pairing/pairing.js --minify --target browser"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.0.0",
+    "hls.js": "^1.6.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

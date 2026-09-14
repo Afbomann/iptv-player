@@ -1,0 +1,11 @@
+{
+  "version": "0.1.1",
+  "build": 2,
+  "notes": "Describe user-visible changes here.",
+  "baseUrl": "https://example.com/lumen/releases/0.1.1/",
+  "assets": {
+    "android": "lumen-android.apk",
+    "windows": "lumen-windows-x64-setup.exe",
+    "linux": "lumen-linux-amd64.deb"
+  }
+}

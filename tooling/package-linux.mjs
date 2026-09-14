@@ -1,0 +1,24 @@
+import {cp, mkdir, mkdtemp, writeFile, chmod, access} from 'node:fs/promises';
+import {resolve,join} from 'node:path';
+import {spawnSync} from 'node:child_process';
+
+const [version,build,bundleArg='build/linux/x64/release/bundle',outArg='distribution/out'] = process.argv.slice(2);
+if (!/^\d+\.\d+\.\d+$/.test(version??'') || !/^[1-9]\d*$/.test(build??'')) throw new Error('Usage: node tooling/package-linux.mjs VERSION BUILD [bundle] [output]');
+if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('Package on Linux x64; this package targets Ubuntu 24.04+ amd64.');
+const bundle=resolve(bundleArg),out=resolve(outArg);
+await access(join(bundle,'lumen_iptv'));
+await mkdir(out,{recursive:true});
+const root=await mkdtemp(join(out,'deb-stage-'));
+await cp(bundle,join(root,'opt/lumen'),{recursive:true});
+await mkdir(join(root,'DEBIAN'),{recursive:true});
+await mkdir(join(root,'usr/bin'),{recursive:true});
+await mkdir(join(root,'usr/share/applications'),{recursive:true});
+await mkdir(join(root,'usr/share/icons/hicolor/192x192/apps'),{recursive:true});
+await cp('web/icons/Icon-192.png',join(root,'usr/share/icons/hicolor/192x192/apps/lumen.png'));
+await writeFile(join(root,'DEBIAN/control'),`Package: lumen-iptv\nVersion: ${version}+${build}\nSection: video\nPriority: optional\nArchitecture: amd64\nMaintainer: Lumen\nDepends: libgtk-3-0t64, libmpv2, libsecret-1-0, libstdc++6, libc6, xdg-utils\nDescription: Local-first IPTV library and player\n No channels or subscriptions are included.\n`);
+await writeFile(join(root,'usr/bin/lumen'), '#!/bin/sh\nexec /opt/lumen/lumen_iptv "$@"\n');
+await chmod(join(root,'usr/bin/lumen'),0o755);
+await writeFile(join(root,'usr/share/applications/lumen.desktop'),'[Desktop Entry]\nType=Application\nName=Lumen\nComment=Your IPTV library and guide\nExec=lumen\nIcon=lumen\nTerminal=false\nCategories=AudioVideo;Player;\n');
+const result=spawnSync('dpkg-deb',['--root-owner-group','--build',root,join(out,'lumen-linux-amd64.deb')],{stdio:'inherit'});
+if(result.status!==0)process.exit(result.status??1);
+console.log('Package built. Staging files retained in '+root);
