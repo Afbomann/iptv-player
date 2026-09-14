@@ -22,7 +22,9 @@ Release tooling is implemented, not yet a published or native-validated release.
 3. Configure repository variables for update-enabled builds:
    - The workflow embeds `https://github.com/Afbomann/iptv-player/releases/latest/download/updates.json` as the update feed.
    - `LUMEN_UPDATE_PUBLIC_KEY`: base64 of the raw 32-byte Ed25519 public key (not PEM/DER).
-4. Run **Build and publish GitHub release** with a semantic version and increasing positive build number. Keep these identical for every platform. Every new release must have a larger build number, including rollback releases. Use a new version each time; existing releases are not overwritten.
+4. Push to the repository's default branch (`master` or `main`) to automatically run **Build and publish GitHub release**. Automatic runs build all three installers and publish after the build/test matrix succeeds. Versions use the pubspec version plus the workflow run number, advancing past the latest signed release when necessary; build numbers also advance past the latest signed release. No version-edit commit or manual dispatch is needed. Signing secrets and the public-key variable must already be configured. Pull requests and non-default branches do not publish.
+
+   Manual dispatch remains available with an explicit semantic version and increasing positive build number. Keep Android and publishing enabled to create a release. Existing releases are not overwritten. A rerun of a partially published run may require manually resolving its draft/tag first.
 5. Download the APK, `.exe`, `.deb` and web artifacts. Windows workers need Inno Setup 6; Linux workers install native build dependencies. The workflow fails if requested signing credentials or build tools are missing.
 
 Back up the Android keystore securely. Future APKs must retain the package ID and signing key to upgrade existing installations. Changing keys ordinarily requires uninstalling first, potentially losing local data.
