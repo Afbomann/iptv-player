@@ -1,11 +1,43 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lumen_iptv/data/providers.dart';
 import 'package:lumen_iptv/core/models.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+class _DelayedProbeClient extends http.BaseClient {
+  final aborted = Completer<void>();
+  bool active = false;
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    active = true;
+    expect(request, isA<http.AbortableRequest>());
+    await (request as http.AbortableRequest).abortTrigger;
+    active = false;
+    aborted.complete();
+    throw http.RequestAbortedException();
+  }
+}
+
 void main() {
+  test('Stream header timeout aborts the in-flight request', () async {
+    final client = _DelayedProbeClient();
+    final provider = ProviderClient(client: client);
+    addTearDown(provider.close);
+    final result = await provider.testStream(
+      const MediaItem(
+        id: 'i',
+        sourceId: 's',
+        name: 'Test',
+        url: 'https://example.test/live.ts',
+      ),
+      headerTimeout: const Duration(milliseconds: 10),
+    );
+    await client.aborted.future;
+    expect(result, contains('could not deliver data'));
+    expect(client.active, false);
+  });
   test(
     'Stream probe reports HTTP errors without exposing credentials',
     () async {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -141,13 +142,19 @@ class ProviderClient {
 
   /// Probe the same cached URL and headers passed to the player. Read only the
   /// first nonempty chunk and cancel; never buffer a live stream or expose URLs.
-  Future<String> testStream(MediaItem item) async {
+  Future<String> testStream(
+    MediaItem item, {
+    Duration headerTimeout = const Duration(seconds: 20),
+  }) async {
+    final abort = Completer<void>();
     try {
-      final request = http.Request('GET', providerUri(item.url));
+      final request = http.AbortableRequest(
+        'GET',
+        providerUri(item.url),
+        abortTrigger: abort.future,
+      );
       request.headers.addAll(item.headers);
-      final response = await client
-          .send(request)
-          .timeout(const Duration(seconds: 20));
+      final response = await client.send(request).timeout(headerTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.stream.listen(null).cancel();
         return 'Account connected, but the saved stream returned HTTP ${response.statusCode}. Catalogue access does not guarantee playback access.';
@@ -167,6 +174,10 @@ class ProviderClient {
       return 'The saved stream returned an empty response.';
     } catch (_) {
       return 'The saved stream could not deliver data. Possible causes include network, TLS, timeout, or browser CORS/HTTPS restrictions.';
+    } finally {
+      // Abort the underlying operation too: Future.timeout alone leaves send
+      // running and can leak a provider connection when headers arrive late.
+      abort.complete();
     }
   }
 

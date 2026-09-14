@@ -292,6 +292,7 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
   String? group, source, error;
   bool loading = false, more = true, multi = false;
   bool showEpisodes = false;
+  int searchPage = 0;
   bool get globalSearch =>
       widget.query.isNotEmpty && widget.kind == null && !widget.favorites;
   int revision = -1, generation = 0;
@@ -301,7 +302,12 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
   void initState() {
     super.initState();
     scroll.addListener(() {
-      if (scroll.position.extentAfter < 600 && more && !loading) load();
+      if (!globalSearch &&
+          scroll.position.extentAfter < 600 &&
+          more &&
+          !loading) {
+        load();
+      }
     });
   }
 
@@ -324,18 +330,20 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
     }
   }
 
-  Future<void> load({bool reset = false}) async {
+  Future<void> load({bool reset = false, int? page}) async {
     if (loading && !reset) return;
     final ticket = ++generation;
     setState(() {
       loading = true;
       error = null;
       if (reset) {
+        searchPage = page ?? 0;
         items = [];
         more = true;
         selected.clear();
       }
     });
+    if (reset && scroll.hasClients) scroll.jumpTo(0);
     final app = ref.read(appProvider);
     try {
       final custom = Map<String, dynamic>.from(
@@ -353,7 +361,7 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
             ? List<String>.from(custom[group!.substring(11)] ?? [])
             : null,
         source: source,
-        offset: items.length,
+        offset: globalSearch ? searchPage * 60 : items.length,
       );
       final categories = await app.store.groups(
         app.current!,
@@ -607,6 +615,33 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
                   ),
                 ),
         ),
+        if (globalSearch)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton.icon(
+                  onPressed: loading || searchPage == 0
+                      ? null
+                      : () => load(reset: true, page: searchPage - 1),
+                  icon: const Icon(Icons.chevron_left),
+                  label: const Text('Previous'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text('Page ${searchPage + 1}'),
+                ),
+                TextButton.icon(
+                  onPressed: loading || !more || error != null
+                      ? null
+                      : () => load(reset: true, page: searchPage + 1),
+                  icon: const Icon(Icons.chevron_right),
+                  label: const Text('Next'),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
