@@ -196,7 +196,7 @@ class MpvEngine extends PlaybackEngine {
     if (native is mk.NativePlayer) {
       // Xtream servers may need time to start a channel or redirect to a CDN.
       // media_kit otherwise uses a five-second network timeout.
-      await native.setProperty('network-timeout', '25');
+      await setMpvProperty(player, 'network-timeout', '25');
     }
     await player.open(
       mk.Media(url ?? item.url, httpHeaders: item.headers, start: start),
