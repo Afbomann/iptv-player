@@ -110,6 +110,10 @@ class MpvEngine extends PlaybackEngine {
 
   MpvEngine({this.software = false}) {
     _subscriptions.addAll([
+      player.stream.log.listen((log) {
+        final specific = specificPlaybackFailure(log.text);
+        if (specific != null) _lastFailure = specific;
+      }),
       player.stream.playing.listen((v) {
         playing = v;
         notifyListeners();
@@ -133,7 +137,8 @@ class MpvEngine extends PlaybackEngine {
         notifyListeners();
       }),
       player.stream.error.listen((v) {
-        _lastFailure = playbackFailure(v);
+        _lastFailure =
+            specificPlaybackFailure(v) ?? _lastFailure ?? playbackFailure(v);
         // MPV can report recoverable decoder/probe errors before succeeding.
         // Do not cover working video with a permanent error overlay.
         _failureTimer ??= Timer(const Duration(seconds: 3), () {
@@ -187,6 +192,12 @@ class MpvEngine extends PlaybackEngine {
       );
     }
     await player.setVolume(initialVolume * 100);
+    final native = player.platform;
+    if (native is mk.NativePlayer) {
+      // Xtream servers may need time to start a channel or redirect to a CDN.
+      // media_kit otherwise uses a five-second network timeout.
+      await native.setProperty('network-timeout', '25');
+    }
     await player.open(
       mk.Media(url ?? item.url, httpHeaders: item.headers, start: start),
     );
@@ -255,7 +266,9 @@ class NativeEngine extends PlaybackEngine {
     position = v.position;
     duration = v.duration;
     if (v.hasError) {
-      error = 'Native playback failed. Try mpv or VLC for this stream.';
+      error =
+          specificPlaybackFailure(v.errorDescription ?? '') ??
+          'Native playback failed without a recognized cause. Try mpv or VLC for this stream.';
     }
     notifyListeners();
   }
@@ -281,7 +294,14 @@ class NativeEngine extends PlaybackEngine {
       videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
     );
     controller!.addListener(_update);
-    await controller!.initialize();
+    try {
+      await controller!.initialize();
+    } catch (failure) {
+      throw StateError(
+        specificPlaybackFailure(failure.toString()) ??
+            'Native playback initialization failed without a recognized cause. Try mpv or VLC for this stream.',
+      );
+    }
     if (terminated) return;
     await controller!.setVolume(initialVolume);
     if (start > Duration.zero) await controller!.seekTo(start);

@@ -20,6 +20,10 @@ void main() {
       'TLS certificate': 'secure',
       'D3D hardware decoder': 'software',
       'tcp: connection refused': 'network',
+      'Failed to recognize file format': 'stream or manifest format',
+      'Protocol not on whitelist': 'protocol required',
+      'Cleartext HTTP traffic not permitted': 'Android blocked',
+      'SSLHandshakeException': 'secure connection',
     }.entries) {
       final message = playbackFailure(
         '${entry.key} https://provider.example/live/private-user/private-password/1.ts?token=secret',

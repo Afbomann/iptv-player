@@ -8,6 +8,7 @@ import 'settings.dart';
 import 'item_actions.dart';
 import 'guide.dart';
 import 'series.dart';
+import 'search_sections.dart';
 
 Future<void> showItem(
   BuildContext context,
@@ -46,9 +47,11 @@ class HomePage extends ConsumerWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Theme.of(context).colorScheme.primaryContainer,
+              colors: [
+                Theme.of(context).colorScheme.primaryContainer,
                 Theme.of(context).colorScheme.surfaceContainerHigh,
-                Theme.of(context).colorScheme.surfaceContainer],
+                Theme.of(context).colorScheme.surfaceContainer,
+              ],
             ),
           ),
           child: Stack(
@@ -553,6 +556,18 @@ class _CatalogPageState extends ConsumerState<CatalogPage> {
                       : widget.favorites
                       ? 'Use the star on a channel or film to keep it close.'
                       : 'Add a playlist in Settings, or try a different group.',
+                )
+              : globalSearch
+              ? SearchSections(
+                  items: items,
+                  controller: scroll,
+                  compact: app.current!.preferences['density'] == 'compact',
+                  tile: (item) => MediaTile(
+                    item: item,
+                    onTap: () => showItem(context, app, item),
+                    onFavorite: () => app.favorite(item),
+                    onMore: () => itemActions(context, app, item),
+                  ),
                 )
               : GridView.builder(
                   controller: scroll,

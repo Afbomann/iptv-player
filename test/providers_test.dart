@@ -6,6 +6,72 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test(
+    'Stream probe reports HTTP errors without exposing credentials',
+    () async {
+      final provider = ProviderClient(
+        client: MockClient(
+          (request) async => http.Response('private response', 403),
+        ),
+      );
+      addTearDown(provider.close);
+      final result = await provider.testStream(
+        const MediaItem(
+          id: 'i',
+          sourceId: 's',
+          name: 'Test',
+          url: 'https://provider.test/live/user/secret/1.ts',
+        ),
+      );
+      expect(result, contains('HTTP 403'));
+      expect(result, isNot(contains('secret')));
+      expect(result, isNot(contains('provider.test')));
+    },
+  );
+  test(
+    'Stream probe rejects HTML and accepts a nonempty media response',
+    () async {
+      var html = true;
+      final provider = ProviderClient(
+        client: MockClient(
+          (request) async => http.Response(
+            html ? '<html>Denied</html>' : 'media',
+            200,
+            headers: {'content-type': html ? 'text/html' : 'video/mp2t'},
+          ),
+        ),
+      );
+      addTearDown(provider.close);
+      const item = MediaItem(
+        id: 'i',
+        sourceId: 's',
+        name: 'Test',
+        url: 'https://provider.test/live.ts',
+      );
+      expect(await provider.testStream(item), contains('instead of media'));
+      html = false;
+      expect(await provider.testStream(item), contains('returned data'));
+    },
+  );
+  test('Xtream credentials survive path encoding exactly once', () {
+    final provider = ProviderClient();
+    addTearDown(provider.close);
+    const source = Source(
+      id: 's',
+      name: 'Test',
+      kind: SourceKind.xtream,
+      url: 'https://provider.test',
+      username: 'user+@ /',
+      password: 'p%/#?&+=',
+    );
+    final stream = Uri.parse(provider.streamUrl(source, 'movie', '42', 'mp4'));
+    expect(stream.pathSegments, [
+      'movie',
+      source.username,
+      source.password,
+      '42.mp4',
+    ]);
+  });
   test('Blank Xtream EPG uses xmltv endpoint and accepts standard DTD', () async {
     final now = DateTime.now().toUtc();
     String stamp(DateTime value) => value

@@ -154,11 +154,31 @@ class _SourceDialogState extends State<SourceDialog> {
         ),
         fileText: fileText,
       );
+      var streamResult = '';
+      final saved = widget.source;
+      final profile = widget.app.current;
+      if (kind == SourceKind.xtream &&
+          saved != null &&
+          profile != null &&
+          saved.url == url.text.trim() &&
+          saved.username == username.text.trim() &&
+          saved.password == password.text) {
+        final channels = await widget.app.store.browse(
+          profile,
+          source: saved.id,
+          kind: MediaKind.live,
+          limit: 1,
+        );
+        if (channels.isNotEmpty) {
+          streamResult =
+              ' ${await widget.app.providers.testStream(channels.first)}';
+        }
+      }
       if (!mounted) return;
       setState(() {
         detectedConnections = result.maximum;
         connectionResult =
-            '${result.message}${result.maximum == null ? '' : ' Limit: ${result.maximum}.'}${result.active == null ? '' : ' Active now: ${result.active}.'} This test does not import the library or verify video playback.';
+            '${result.message}${result.maximum == null ? '' : ' Limit: ${result.maximum}.'}${result.active == null ? '' : ' Active now: ${result.active}.'}$streamResult This test does not import the library or verify video decoding.';
       });
     } catch (e) {
       if (mounted) setState(() => error = friendlyError(e));

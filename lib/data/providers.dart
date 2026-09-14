@@ -139,6 +139,37 @@ class ProviderClient {
     );
   }
 
+  /// Probe the same cached URL and headers passed to the player. Read only the
+  /// first nonempty chunk and cancel; never buffer a live stream or expose URLs.
+  Future<String> testStream(MediaItem item) async {
+    try {
+      final request = http.Request('GET', providerUri(item.url));
+      request.headers.addAll(item.headers);
+      final response = await client
+          .send(request)
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        await response.stream.listen(null).cancel();
+        return 'Account connected, but the saved stream returned HTTP ${response.statusCode}. Catalogue access does not guarantee playback access.';
+      }
+      final type = (response.headers['content-type'] ?? '').toLowerCase();
+      if (type.contains('text/html') || type.contains('application/json')) {
+        await response.stream.listen(null).cancel();
+        return 'The saved stream returned a web page or JSON instead of media.';
+      }
+      await for (final bytes in response.stream.timeout(
+        const Duration(seconds: 15),
+      )) {
+        if (bytes.isNotEmpty) {
+          return 'The saved stream is reachable and returned data (HTTP ${response.statusCode}). Video decoding is not verified.';
+        }
+      }
+      return 'The saved stream returned an empty response.';
+    } catch (_) {
+      return 'The saved stream could not deliver data. Possible causes include network, TLS, timeout, or browser CORS/HTTPS restrictions.';
+    }
+  }
+
   Future<Uint8List> download(Uri url, {int maxBytes = 64 * 1024 * 1024}) async {
     try {
       final response = await client
