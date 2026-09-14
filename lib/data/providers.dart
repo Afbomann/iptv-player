@@ -316,7 +316,8 @@ class ProviderClient {
         .replace(
           path:
               '$path/$type/${Uri.encodeComponent(s.username)}/${Uri.encodeComponent(s.password)}/$id.$extension',
-          query: null,
+          query: '',
+          fragment: '',
         )
         .toString();
   }
@@ -371,7 +372,7 @@ class ProviderClient {
     int futureDays = 7,
   }) async {
     final urls = <Uri>[];
-    if (source.epgUrl.isNotEmpty) {
+    if (source.epgUrl.trim().isNotEmpty) {
       urls.addAll(
         source.epgUrl
             .split('\n')
@@ -440,7 +441,8 @@ class ProviderClient {
           .replace(
             path:
                 '$root/timeshift/${Uri.encodeComponent(source.username)}/${Uri.encodeComponent(source.password)}/${(p.end.difference(p.start).inSeconds / 60).ceil()}/$stamp/${item.providerId}.ts',
-            query: null,
+            query: '',
+            fragment: '',
           )
           .toString();
     }
@@ -606,12 +608,10 @@ String m3uStreamIdentity(Uri uri) {
 
 DateTime xmltvTime(String input) {
   final m = RegExp(
-    r'^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*([+-])(\d{2})(\d{2})$',
+    r'^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?(?:\s*([+-])(\d{2})(\d{2})|\s*(?:Z|UTC|GMT))?$',
   ).firstMatch(input.trim());
   if (m == null) {
-    throw const FormatException(
-      'XMLTV timestamp needs an explicit UTC offset.',
-    );
+    throw const FormatException('Invalid XMLTV timestamp or timezone.');
   }
   int n(int i) => int.parse(m.group(i) ?? '0');
   final offset = (n(8) * 60 + n(9)) * (m.group(7) == '-' ? -1 : 1);
@@ -639,7 +639,15 @@ List<Programme> parseXmltv(Map<String, dynamic> args) {
   if (bytes.length > 256 * 1024 * 1024) {
     throw const FormatException('Expanded EPG is too large.');
   }
-  final text = utf8.decode(bytes, allowMalformed: true);
+  var text = utf8.decode(bytes, allowMalformed: true);
+  // A normal XMLTV external DTD declaration is metadata, not an instruction
+  // to fetch a resource. Never allow internal subsets or custom entities.
+  text = text.replaceAll(
+    RegExp(
+      r'''<!DOCTYPE\s+tv(?:\s+SYSTEM\s+(?:"[^"<>]*"|'[^'<>]*')|\s+PUBLIC\s+(?:"[^"<>]*"|'[^'<>]*')\s+(?:"[^"<>]*"|'[^'<>]*'))?\s*>''',
+    ),
+    '',
+  );
   if (text.contains('<!DOCTYPE') || text.contains('<!ENTITY')) {
     throw const FormatException('XML entities are not supported.');
   }

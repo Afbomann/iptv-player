@@ -34,7 +34,7 @@ The administrator uses a password (at least 10 characters). New regular profiles
 - Two/four-pane viewing, source connection limits, engine preferences and available audio/subtitle tracks.
 - Native live/scheduled direct-stream and clear MPEG-TS HLS recording.
 - Password-encrypted portable backups, transactional restore and rollback; recording media is excluded.
-- Single-use, five-minute LAN QR provider entry and backup transfer (64 MB transfer limit).
+- Single-use LAN QR provider entry (five minutes) and chunked encrypted backup transfer (30 minutes, 256 MiB archive limit). Uploads spool to temporary disk storage. Backups are compressed before encryption, with a 512 MiB expanded-data safety limit. Existing version-1 backups remain readable; new version-2 backups require an updated app to restore.
 - Signed release checks and verified package downloads when configured; installation is manual.
 
 ## Platform status

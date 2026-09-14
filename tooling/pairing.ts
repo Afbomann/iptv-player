@@ -26,24 +26,51 @@ if (!session || !encoded) {
     const button = form.querySelector('button')!;
     button.disabled = true;
     try {
-      if(mode==='download'){
-        const response=await fetch('/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session})});
-        if(!response.ok)throw new Error('The transfer has expired. Open a new QR code on your TV.');
-        const box=await response.json();const cipher=from64(box.cipher),mac=from64(box.mac),combined=new Uint8Array(cipher.length+mac.length);
-        combined.set(cipher);combined.set(mac,cipher.length);
-        const plaintext=gcm(key,from64(box.nonce)).decrypt(combined);
-        const url=URL.createObjectURL(new Blob([plaintext],{type:'application/octet-stream'}));
+      if(mode==='download' || mode==='upload') {
+        const limit=256*1024*1024, chunkSize=256*1024;
+        const frame=async(path:string,payload:Record<string,unknown>)=>{
+          const nonce=crypto.getRandomValues(new Uint8Array(12));
+          const cipher=gcm(key,nonce).encrypt(new TextEncoder().encode(JSON.stringify(payload)));
+          const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({session,nonce:to64(nonce),cipher:to64(cipher.subarray(0,-16)),mac:to64(cipher.subarray(-16))}),
+            signal:AbortSignal.timeout(120000)});
+          if(!response.ok)throw new Error(response.status===413?'Backup exceeds the 256 MB limit.':'Transfer interrupted or expired. Scan a new QR code and retry.');
+          return response;
+        };
+        if(mode==='upload') {
+          const file=form.querySelector<HTMLInputElement>('input[type=file]')!.files![0];
+          if(!file || file.size>limit)throw new Error('Choose a backup no larger than 256 MB.');
+          let index=0;
+          for(let offset=0;offset<file.size || (offset===0 && file.size===0);offset+=chunkSize) {
+            const end=Math.min(offset+chunkSize,file.size);
+            const bytes=new Uint8Array(await file.slice(offset,end).arrayBuffer());
+            await frame('/backup/upload',{index:index++,bytes:to64(bytes),done:end===file.size});
+            status.textContent=`Sending backup: ${Math.round(end/Math.max(1,file.size)*100)}%`;
+          }
+          form.hidden=true;key.fill(0);status.textContent='Backup sent. Confirm restore on your TV.';
+          return;
+        }
+        const chunks:Uint8Array<ArrayBuffer>[]=[];let total=0;
+        for(let index=0;;index++) {
+          const response=await frame('/backup/download',{index});
+          const box=await response.json(), cipher=from64(box.cipher),mac=from64(box.mac);
+          const combined=new Uint8Array(cipher.length+mac.length);combined.set(cipher);combined.set(mac,cipher.length);
+          const payload=JSON.parse(new TextDecoder().decode(gcm(key,from64(box.nonce)).decrypt(combined)));
+          if(payload.index!==index || typeof payload.done!=='boolean')throw new Error('Invalid transfer frame.');
+          const bytes=from64(payload.bytes);total+=bytes.length;
+          if(total>limit)throw new Error('Backup exceeds the 256 MB limit.');
+          chunks.push(bytes);
+          status.textContent=`Downloading backup: ${Math.round(total/Math.max(1,payload.total)*100)}%`;
+          if(payload.done)break;
+        }
+        const url=URL.createObjectURL(new Blob(chunks,{type:'application/octet-stream'}));
         const link=document.createElement('a');link.href=url;link.download='lumen-backup.lumen';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
         form.hidden=true;key.fill(0);status.textContent='Backup downloaded. Keep the file and its password safe.';return;
       }
       // getRandomValues is available on HTTP LAN origins; WebCrypto encryption is not.
       const nonce = crypto.getRandomValues(new Uint8Array(12));
       let content:Record<string,unknown>=Object.fromEntries(new FormData(form));
-      if(mode==='upload'){
-        const file=form.querySelector<HTMLInputElement>('input[type=file]')!.files![0];
-        if(file.size>64*1024*1024)throw new Error('Use a backup smaller than 64 MB for QR transfer.');
-        content={backup:await file.text()};
-      }
+
       const payload = new TextEncoder().encode(JSON.stringify(content));
       const cipher = gcm(key, nonce).encrypt(payload);
       const response = await fetch('/submit', {

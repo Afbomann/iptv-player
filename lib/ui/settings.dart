@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../platform/backup_file.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -295,11 +296,13 @@ class _SourceDialogState extends State<SourceDialog> {
                       : 'XMLTV EPG URL (optional)',
                   maxLines: 3,
                 ),
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 12),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
-                    'One EPG URL per line. Earlier feeds take priority when programmes overlap.',
-                    style: TextStyle(fontSize: 11, color: mutedColor),
+                    kind == SourceKind.xtream
+                        ? 'Leave empty to load the provider guide automatically using your Xtream account. Overrides: one URL per line.'
+                        : 'One EPG URL per line. Earlier feeds take priority when programmes overlap.',
+                    style: const TextStyle(fontSize: 11, color: mutedColor),
                   ),
                 ),
                 Row(
@@ -496,21 +499,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> backup({bool restore = false}) async {
+    await perform(context, () => _backup(restore: restore));
+  }
+
+  Future<void> _backup({bool restore = false}) async {
     if (isAppleTV) {
       await transferBackup(context, ref.read(appProvider));
       return;
     }
     final app = ref.read(appProvider);
-    final password = TextEditingController();
+    var password = '';
     String? archive;
     if (restore) {
       final file = await FilePicker.platform.pickFiles(
-        withData: true,
+        withData: kIsWeb,
         type: FileType.custom,
         allowedExtensions: ['lumen'],
       );
       if (file == null) return;
-      archive = utf8.decode(file.files.single.bytes!);
+      archive = await readBackupFile(file.files.single);
     }
     if (!mounted) return;
     final answer = await showDialog<bool>(
@@ -529,7 +536,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
               const SizedBox(height: 20),
               TextField(
-                controller: password,
+                onChanged: (value) => password = value,
                 obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Backup password',
@@ -556,9 +563,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       setState(() => busy = true);
       await perform(context, () async {
         if (restore) {
-          await app.restoreBackup(archive!, password.text);
+          await app.restoreBackup(archive!, password);
         } else {
-          final data = await app.exportBackup(password.text);
+          final data = await app.exportBackup(password);
           await FilePicker.platform.saveFile(
             dialogTitle: 'Save encrypted Lumen backup',
             fileName:
@@ -571,7 +578,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       });
       if (mounted) setState(() => busy = false);
     }
-    password.dispose();
   }
 
   Future<void> newAccount() async {
@@ -900,7 +906,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   horizontal: 20,
                   vertical: 8,
                 ),
-                leading: const Icon(Icons.playlist_play, color: limeColor),
+                leading: Icon(
+                  Icons.playlist_play,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 title: Text(s.name),
                 subtitle: Text(
                   '${s.kind.name.toUpperCase()} · refresh every ${s.refreshHours}h · EPG every ${s.epgHours}h',
@@ -1125,10 +1134,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             items:
                 [EngineKind.automatic, ...PlaybackCapabilities.current.engines]
                     .map(
-                      (k) => DropdownMenuItem(
-                        value: k.name,
-                        child: Text(k.name.toUpperCase()),
-                      ),
+                      (k) =>
+                          DropdownMenuItem(value: k.name, child: Text(k.label)),
                     )
                     .toList(),
             onChanged: (v) => app.preferences({'engine': v}),

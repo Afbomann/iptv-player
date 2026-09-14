@@ -9,8 +9,8 @@ import 'platform/device.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  PaintingBinding.instance.imageCache.maximumSize = 160;
-  PaintingBinding.instance.imageCache.maximumSizeBytes = 48 * 1024 * 1024;
+  PaintingBinding.instance.imageCache.maximumSize = 100;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 24 * 1024 * 1024;
   if (!kIsWeb && !isAppleTV) MediaKit.ensureInitialized();
   try {
     final store = await LibraryStore.open();

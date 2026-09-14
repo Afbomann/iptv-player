@@ -8,6 +8,7 @@ import '../data/database.dart';
 import '../data/providers.dart';
 import 'models.dart';
 import 'security.dart';
+import 'backup_limits.dart';
 import 'recording_service.dart';
 import 'updates.dart';
 import 'refresh_failure.dart';
@@ -17,6 +18,10 @@ final appProvider = ChangeNotifierProvider<AppController>(
   (ref) => throw UnimplementedError('Provide a LibraryStore at startup.'),
 );
 Future<String> _hash(String value) => Security.hashPassword(value);
+Future<String> _backup(List<String> values) =>
+    Security.backup(values[0], values[1]);
+Future<String> _restore(List<String> values) =>
+    Security.restore(values[0], values[1]);
 Future<String> _hashPin(String value) => Security.hashPin(value);
 Future<bool> _verify(List<String> values) =>
     Security.verify(values[0], values[1]);
@@ -31,6 +36,7 @@ class AppController extends ChangeNotifier {
   List<Source> sources = [];
   Profile? current;
   bool refreshing = false;
+  bool backupBusy = false;
   String? activity;
   String? refreshError;
   String? refreshSummary;
@@ -99,12 +105,20 @@ class AppController extends ChangeNotifier {
   }
 
   void requireAdmin() {
+    requireBackupIdle();
     if (current?.admin != true) {
       throw StateError('Administrator access is required.');
     }
   }
 
+  void requireBackupIdle() {
+    if (backupBusy) {
+      throw StateError('Wait for the current backup or restore to finish.');
+    }
+  }
+
   Future<void> createAdmin(String name, String password) async {
+    requireBackupIdle();
     if ((await store.profiles()).isNotEmpty) {
       throw StateError('An administrator already exists.');
     }
@@ -117,6 +131,7 @@ class AppController extends ChangeNotifier {
       passwordHash: await compute(_hash, password),
       admin: true,
     );
+    requireBackupIdle();
     await store.saveProfile(p);
     profiles = [p];
     current = p;
@@ -124,6 +139,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> login(Profile profile, String password) async {
+    requireBackupIdle();
     if (_signingIn) {
       throw StateError('A sign-in attempt is already in progress.');
     }
@@ -147,6 +163,7 @@ class AppController extends ChangeNotifier {
       );
     }
     if (!await compute(_verify, [password, latest.passwordHash])) {
+      requireBackupIdle();
       final failures = (throttle['failures'] ?? 0) + 1;
       await store.setSetting('login:${profile.id}', {
         'failures': failures,
@@ -160,6 +177,7 @@ class AppController extends ChangeNotifier {
         latest.usesPin ? 'Incorrect PIN.' : 'Incorrect password.',
       );
     }
+    requireBackupIdle();
     await store.setSetting('login:${profile.id}', {'failures': 0, 'until': 0});
     current = latest;
     changed();
@@ -167,6 +185,7 @@ class AppController extends ChangeNotifier {
   }
 
   void logout() {
+    requireBackupIdle();
     current = null;
     changed();
   }
@@ -229,6 +248,7 @@ class AppController extends ChangeNotifier {
       'pin': true,
     });
     await store.db.transaction(() async {
+      requireBackupIdle();
       await store.saveProfile(updated);
       await store.setSetting('login:${latest.id}', {'failures': 0, 'until': 0});
     });
@@ -244,6 +264,7 @@ class AppController extends ChangeNotifier {
     if (latest.admin) {
       throw StateError('The administrator cannot be discoverable.');
     }
+    requireBackupIdle();
     await store.saveProfile(
       Profile.fromJson({...latest.toJson(), 'discoverable': value}),
     );
@@ -252,6 +273,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> loginByName(String name, String secret) async {
+    requireBackupIdle();
     final profile = (await store.profiles())
         .where(
           (p) => !p.admin && p.name.toLowerCase() == name.trim().toLowerCase(),
@@ -272,6 +294,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> preferences(Map<String, dynamic> values) async {
+    requireBackupIdle();
     final p = current;
     if (p == null) return;
     final updated = Profile.fromJson({
@@ -334,6 +357,7 @@ class AppController extends ChangeNotifier {
       }
       sources = await store.sources();
     } finally {
+      await store.releaseMemory();
       refreshing = false;
       activity = null;
       changed();
@@ -388,7 +412,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> refreshDue({bool startup = false, bool force = false}) async {
-    if (refreshing || current == null) return;
+    if (refreshing || backupBusy || current == null) return;
     refreshing = true;
     refreshError = null;
     refreshSummary = null;
@@ -508,63 +532,88 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> favorite(MediaItem item) async {
+    requireBackupIdle();
     final p = current;
     if (p == null || !p.allows(item)) return;
     final state = await store.state(p.id, item.id);
+    requireBackupIdle();
     await store.setState(p.id, item.id, favorite: state['favorite'] != 1);
     changed();
   }
 
   Future<List<MediaItem>> episodes(MediaItem series) async {
+    requireBackupIdle();
     final p = current;
     if (p == null || !p.allows(series)) {
       throw StateError('Content is restricted.');
     }
     final source = sources.firstWhere((s) => s.id == series.sourceId);
     final episodes = await providers.episodes(source, series);
+    requireBackupIdle();
     await store.replaceItems(source, episodes, parent: series.id);
     return episodes.where(p.allows).toList();
   }
 
   Future<String> exportBackup(String password) async {
     requireAdmin();
-    final raw = decodeMap(await store.exportData());
-    // Local-file inputs use the device key at rest; make them portable inside the archive.
-    for (final row in raw['settings'] as List) {
-      if ((row['id'] as String).startsWith('file:')) {
-        final payload = decodeMap(row['payload']);
-        row['payload'] = jsonEncode({
-          'portable': await Security.open(payload['encrypted'], store.key),
-        });
-      }
+    if (password.length < 10) {
+      throw const FormatException(
+        'Backup password must be at least 10 characters.',
+      );
     }
-    return Security.backup(jsonEncode(raw), password);
+    if (backupBusy || refreshing) {
+      throw StateError('Wait for the current backup or refresh to finish.');
+    }
+    backupBusy = true;
+    progressChanged();
+    try {
+      final raw = await store.exportData(portableFiles: true);
+      final archive = await compute(_backup, [raw, password]);
+      if (archive.length > backupTransferLimit) {
+        throw const FormatException('Backup exceeds the 256 MB limit.');
+      }
+      return archive;
+    } finally {
+      backupBusy = false;
+      progressChanged();
+    }
   }
 
   Future<void> restoreBackup(String archive, String password) async {
     if (profiles.isNotEmpty) requireAdmin();
-    if (refreshing) throw StateError('Wait for the current refresh to finish.');
-    if (recording.active.isNotEmpty) {
+    if (backupBusy || refreshing) {
+      throw StateError('Wait for the current backup or refresh to finish.');
+    }
+    if (recording.active.isNotEmpty || recording.checking) {
       throw StateError('Stop active recordings before restoring a backup.');
     }
-    final raw = decodeMap(await Security.restore(archive, password));
-    for (final row in raw['settings'] as List) {
-      if ((row['id'] as String).startsWith('file:')) {
-        final payload = decodeMap(row['payload']);
-        row['payload'] = jsonEncode({
-          'encrypted': await Security.seal(payload['portable'], store.key),
+    backupBusy = true;
+    recording.suspended = true;
+    progressChanged();
+    try {
+      // Compress the rollback before decoding the incoming library, avoiding two
+      // expanded libraries alive at once. Never include a prior rollback.
+      final rollback = await compute(_backup, [
+        await store.exportData(),
+        base64Encode(await store.key.extractBytes()),
+      ]);
+      final raw = await compute(_restore, [archive, password]);
+      await store.db.transaction(() async {
+        await store.importData(raw, portableFiles: true);
+        await store.setSetting('rollback', {
+          'format': 'lumen-backup-v2-device-key',
+          'encrypted': rollback,
         });
-      }
+      });
+      profiles = await store.profiles();
+      sources = await store.sources();
+      current = null;
+      changed();
+    } finally {
+      recording.suspended = false;
+      backupBusy = false;
+      progressChanged();
     }
-    final rollback = await store.exportData();
-    await store.importData(jsonEncode(raw));
-    await store.setSetting('rollback', {
-      'encrypted': await Security.seal(rollback, store.key),
-    });
-    profiles = await store.profiles();
-    sources = await store.sources();
-    current = null;
-    changed();
   }
 
   @override

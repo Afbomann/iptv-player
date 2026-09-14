@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import '../platform/backup_file.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/controller.dart';
@@ -13,6 +14,7 @@ import 'guide.dart';
 import 'live_categories.dart';
 import 'recordings.dart';
 import 'backup_transfer.dart';
+import 'backup_input_lock.dart';
 import '../platform/device.dart';
 
 class LumenApp extends ConsumerWidget {
@@ -22,6 +24,7 @@ class LumenApp extends ConsumerWidget {
     final app = ref.watch(appProvider);
     final prefs = app.current?.preferences ?? {};
     return MaterialApp(
+      key: ValueKey(app.current?.id),
       title: 'Lumen',
       debugShowCheckedModeBanner: false,
       theme: lumenTheme(
@@ -33,7 +36,30 @@ class LumenApp extends ConsumerWidget {
         data: MediaQuery.of(context).copyWith(
           textScaler: TextScaler.linear((prefs['textScale'] ?? 1.0).toDouble()),
         ),
-        child: child!,
+        child: Stack(
+          children: [
+            BackupInputLock(busy: app.backupBusy, child: child!),
+            if (app.backupBusy)
+              Positioned.fill(
+                child: Material(
+                  color: Colors.black87,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 20),
+                        const Text(
+                          'Processing backup… Keep the app open.',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
       home: app.current == null
           ? const AccountGate()
@@ -93,23 +119,27 @@ class _AccountGateState extends ConsumerState<AccountGate> {
   }
 
   Future<void> restore() async {
+    await perform(context, _restore);
+  }
+
+  Future<void> _restore() async {
     if (isAppleTV) {
       await transferBackup(context, ref.read(appProvider));
       return;
     }
     final file = await FilePicker.platform.pickFiles(
-      withData: true,
+      withData: kIsWeb,
       type: FileType.custom,
       allowedExtensions: ['lumen'],
     );
     if (file == null || !mounted) return;
-    final secret = TextEditingController();
+    var secret = '';
     final accepted = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
         title: const Text('Restore your Lumen'),
         content: TextField(
-          controller: secret,
+          onChanged: (value) => secret = value,
           obscureText: true,
           decoration: const InputDecoration(labelText: 'Backup password'),
         ),
@@ -129,13 +159,12 @@ class _AccountGateState extends ConsumerState<AccountGate> {
       setState(() => busy = true);
       await perform(
         context,
-        () => ref
+        () async => ref
             .read(appProvider)
-            .restoreBackup(utf8.decode(file.files.single.bytes!), secret.text),
+            .restoreBackup(await readBackupFile(file.files.single), secret),
       );
       if (mounted) setState(() => busy = false);
     }
-    secret.dispose();
   }
 
   @override
@@ -463,6 +492,17 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) ref.read(appProvider).refreshDue();
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      PaintingBinding.instance.imageCache.clear();
+      unawaited(ref.read(appProvider).store.releaseMemory());
+    }
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    PaintingBinding.instance.imageCache.clear();
+    unawaited(ref.read(appProvider).store.releaseMemory());
   }
 
   void navigate(int index) {
@@ -565,10 +605,12 @@ class _AppShellState extends ConsumerState<AppShell>
             padding: const EdgeInsets.all(16),
             child: ListTile(
               leading: CircleAvatar(
-                backgroundColor: const Color(0xff46553e),
+                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
                 child: Text(
                   p.name.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(color: limeColor),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
               ),
               title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../core/controller.dart';
+import '../core/backup_limits.dart';
 import '../platform/pairing.dart';
 import 'common.dart';
 
 Future<void> transferBackup(BuildContext context, AppController app) async {
-  final password = TextEditingController();
+  var password = '';
   var upload = app.profiles.isEmpty;
   final confirmed = await showDialog<bool>(
     context: context,
@@ -37,7 +38,7 @@ Future<void> transferBackup(BuildContext context, AppController app) async {
               ),
               const SizedBox(height: 20),
               TextField(
-                controller: password,
+                onChanged: (value) => password = value,
                 obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Backup password',
@@ -61,11 +62,9 @@ Future<void> transferBackup(BuildContext context, AppController app) async {
     ),
   );
   if (confirmed != true || !context.mounted) {
-    password.dispose();
     return;
   }
-  final secret = password.text;
-  password.dispose();
+  final secret = password;
   await perform(context, () async {
     if (secret.length < 10) {
       throw const FormatException(
@@ -76,9 +75,9 @@ Future<void> transferBackup(BuildContext context, AppController app) async {
     String? incoming;
     BuildContext? dialog;
     final archive = upload ? null : await app.exportBackup(secret);
-    if (archive != null && archive.length > 64 * 1024 * 1024) {
+    if (archive != null && archive.length > backupTransferLimit) {
       throw const FormatException(
-        'This backup exceeds the 64 MB QR transfer limit. Use file export.',
+        'This backup exceeds the 256 MB transfer limit.',
       );
     }
     await server.start(
@@ -103,7 +102,7 @@ Future<void> transferBackup(BuildContext context, AppController app) async {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Use a phone or PC on the same network. This transfer expires in 5 minutes.',
+                    'Use a phone or PC on the same network. Up to 256 MB. This transfer expires in 30 minutes.',
                   ),
                   const SizedBox(height: 20),
                   Container(

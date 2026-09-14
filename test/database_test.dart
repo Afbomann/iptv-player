@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:lumen_iptv/ui/backup_transfer.dart';
 import 'package:sqlite3/open.dart';
 import 'package:lumen_iptv/data/database.dart';
 import 'package:lumen_iptv/core/models.dart';
@@ -68,6 +70,112 @@ void main() {
     await store.saveProfile(child);
     await store.replaceItems(source, items);
   });
+  test(
+    'Controller backup restores portable files and resets busy state after failures',
+    () async {
+      final app = AppController(store)..current = admin;
+      app.profiles = await store.profiles();
+      addTearDown(app.dispose);
+      await store.setSetting('file:s', {
+        'encrypted': await Security.seal('#EXTM3U', store.key),
+      });
+      final backup = await app.exportBackup('backup passphrase');
+      expect(app.backupBusy, false);
+      await store.setSetting('new-setting', {'value': true});
+      final before = await store.exportData();
+      await expectLater(
+        app.restoreBackup('invalid', 'backup passphrase'),
+        throwsFormatException,
+      );
+      expect(await store.exportData(), before);
+      expect(app.backupBusy, false);
+      expect(app.recording.suspended, false);
+      await app.restoreBackup(backup, 'backup passphrase');
+      expect(app.current, isNull);
+      expect(app.backupBusy, false);
+      expect(await store.setting('new-setting'), isNull);
+      final file = await store.setting('file:s');
+      expect(await Security.open(file!['encrypted'], store.key), '#EXTM3U');
+      expect(await store.setting('rollback'), isNotNull);
+      expect(
+        await store.exportData(),
+        isNot(contains('lumen-backup-v2-device-key')),
+      );
+    },
+  );
+  testWidgets(
+    'Closing the backup password dialog does not dispose a live field',
+    (tester) async {
+      final app = AppController(store)..current = admin;
+      app.profiles = [admin];
+      addTearDown(app.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => transferBackup(context, app),
+                child: const Text('Backup'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Backup'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'backup passphrase');
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(AlertDialog), findsNothing);
+    },
+  );
+  test(
+    'Releasing SQLite memory preserves the library and user state',
+    () async {
+      await store.setState(admin.id, items.first.id, favorite: true);
+      final before = await store.exportData();
+      await store.releaseMemory();
+      expect(await store.exportData(), before);
+      expect(
+        (await store.browse(admin, favorites: true)).single.id,
+        items.first.id,
+      );
+    },
+  );
+  test(
+    'Backup lock rejects conflicting controller mutations without writes',
+    () async {
+      final app = AppController(store)..current = admin;
+      app.profiles = [admin, child];
+      app.backupBusy = true;
+      addTearDown(app.dispose);
+      final before = await store.exportData();
+      for (final action in <Future<void> Function()>[
+        () => app.addSource(source),
+        () => app.updateSource(source),
+        () => app.removeSource(source),
+        () => app.createAdmin('Admin', 'password'),
+        () => app.createUser('User', '1234'),
+        () => app.updateUser(child),
+        () => app.resetUserPin(child, '1234'),
+        () => app.setDiscoverable(child, false),
+        () => app.deleteUser(child),
+        () => app.login(admin, 'password'),
+        () => app.loginByName('Child', '1234'),
+        () => app.preferences({'accent': 1}),
+        () => app.favorite(items.first),
+        () async {
+          await app.episodes(items.first);
+        },
+      ]) {
+        await expectLater(action(), throwsStateError);
+      }
+      expect(app.logout, throwsStateError);
+      expect(app.current, admin);
+      expect(await store.exportData(), before);
+    },
+  );
   for (final kind in [SourceKind.m3u, SourceKind.file]) {
     test(
       '$kind migrates legacy items and invalidates orphan-only recovery once',

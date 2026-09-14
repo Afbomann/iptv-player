@@ -10,6 +10,7 @@ import '../core/models.dart';
 import '../platform/device.dart';
 import 'mpv_property_stub.dart' if (dart.library.io) 'mpv_property_io.dart';
 import 'types.dart';
+import 'failure.dart';
 export 'types.dart';
 import 'browser_stub.dart' if (dart.library.js_interop) 'browser.dart';
 
@@ -54,7 +55,7 @@ class PlaybackCapabilities {
       ),
       TargetPlatform.windows ||
       TargetPlatform.linux => const PlaybackCapabilities(
-        engines: [EngineKind.mpv],
+        engines: [EngineKind.mpv, EngineKind.mpvSoftware],
         recording: true,
         multiview: true,
         frameRate: false,
@@ -107,7 +108,7 @@ class MpvEngine extends PlaybackEngine {
     }
   }
 
-  MpvEngine() {
+  MpvEngine({this.software = false}) {
     _subscriptions.addAll([
       player.stream.playing.listen((v) {
         playing = v;
@@ -118,6 +119,12 @@ class MpvEngine extends PlaybackEngine {
         notifyListeners();
       }),
       player.stream.position.listen((v) {
+        if (v > position) {
+          _lastProgress = DateTime.now();
+          _failureTimer?.cancel();
+          _failureTimer = null;
+          error = null;
+        }
         position = v;
         notifyListeners();
       }),
@@ -126,23 +133,37 @@ class MpvEngine extends PlaybackEngine {
         notifyListeners();
       }),
       player.stream.error.listen((v) {
-        error = 'Playback failed. Try another engine or check the stream.';
-        notifyListeners();
+        _lastFailure = playbackFailure(v);
+        // MPV can report recoverable decoder/probe errors before succeeding.
+        // Do not cover working video with a permanent error overlay.
+        _failureTimer ??= Timer(const Duration(seconds: 3), () {
+          _failureTimer = null;
+          if (!terminated &&
+              DateTime.now().difference(_lastProgress).inSeconds >= 3) {
+            error = _lastFailure;
+            notifyListeners();
+          }
+        });
       }),
     ]);
   }
+  final bool software;
+  Timer? _failureTimer;
+  String? _lastFailure;
+  DateTime _lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
   final player = mk.Player(
     configuration: const mk.PlayerConfiguration(bufferSize: 16 * 1024 * 1024),
   );
   late final controller = VideoController(
     player,
-    configuration: const VideoControllerConfiguration(
-      enableHardwareAcceleration: true,
+    configuration: VideoControllerConfiguration(
+      enableHardwareAcceleration: !software,
+      hwdec: software ? 'no' : null,
     ),
   );
   final _subscriptions = <StreamSubscription>[];
   @override
-  EngineKind get kind => kIsWeb ? EngineKind.browser : EngineKind.mpv;
+  EngineKind get kind => software ? EngineKind.mpvSoftware : EngineKind.mpv;
   @override
   Widget surface() => Video(controller: controller, controls: NoVideoControls);
   @override
@@ -151,6 +172,20 @@ class MpvEngine extends PlaybackEngine {
     String? url,
     Duration start = Duration.zero,
   }) async {
+    error = null;
+    _lastFailure = null;
+    _lastProgress = DateTime.fromMillisecondsSinceEpoch(0);
+    _failureTimer?.cancel();
+    _failureTimer = null;
+    // Initialize the video output before opening media, independent of when
+    // Flutter mounts the surface (important for desktop texture initialization).
+    try {
+      await controller.platform.future.timeout(const Duration(seconds: 20));
+    } catch (_) {
+      throw StateError(
+        'Video output could not initialize. Try MPV (software decoding) and update the graphics driver.',
+      );
+    }
     await player.setVolume(initialVolume * 100);
     await player.open(
       mk.Media(url ?? item.url, httpHeaders: item.headers, start: start),
@@ -184,6 +219,7 @@ class MpvEngine extends PlaybackEngine {
   @override
   Future<void> close() async {
     if (!beginClose()) return;
+    _failureTimer?.cancel();
     for (final s in _subscriptions) {
       await s.cancel();
     }
@@ -403,6 +439,7 @@ PlaybackEngine createEngine(EngineKind preference) {
     EngineKind.native => NativeEngine(),
     EngineKind.vlc => VlcEngine(),
     EngineKind.browser => createBrowserEngine(),
+    EngineKind.mpvSoftware => MpvEngine(software: true),
     _ => MpvEngine(),
   };
 }

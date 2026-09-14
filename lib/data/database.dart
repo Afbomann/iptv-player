@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../platform/device.dart';
 import '../core/models.dart';
 import '../core/security.dart';
+import '../core/backup_limits.dart';
 import 'sync.dart';
 import 'providers.dart' show stableId, m3uStreamIdentity;
 export 'sync.dart' show SyncDelta;
@@ -80,6 +81,17 @@ class LibraryStore {
   LibraryStore(this.db, this.key);
   final LumenDatabase db;
   final SecretKey key;
+
+  /// Release disposable SQLite allocations, never catalog data. Best effort:
+  /// memory cleanup must not turn a successful refresh into a failure.
+  Future<void> releaseMemory() async {
+    try {
+      await db.customStatement('PRAGMA shrink_memory');
+    } catch (_) {
+      // The database can already be closing during lifecycle teardown.
+    }
+  }
+
   static Future<LibraryStore> open() async {
     const vault = FlutterSecureStorage();
     var encoded = await vault.read(key: 'lumen.database.key.v1');
@@ -726,8 +738,10 @@ class LibraryStore {
   Future<List<Map<String, dynamic>>> recordings() => _all('recordings');
   Future<void> saveRecording(Map<String, dynamic> job) =>
       _put('recordings', job['id'], job);
-  Future<String> exportData() async {
-    final result = <String, dynamic>{'version': 1};
+  Future<String> exportData({
+    bool portableFiles = false,
+  }) => db.transaction(() async {
+    final result = StringBuffer('{"version":1');
     for (final table in [
       'profiles',
       'sources',
@@ -738,25 +752,54 @@ class LibraryStore {
       'recordings',
       'channel_order',
     ]) {
-      final rows = await db
-          .customSelect(
-            'SELECT * FROM $table ${table == 'settings' ? "WHERE id != 'rollback'" : ''}',
-          )
-          .get();
-      result[table] = await Future.wait(
-        rows.map((r) async {
+      result.write(',"$table":[');
+      var first = true;
+      var cursor = 0;
+      while (true) {
+        final rows = await db
+            .customSelect(
+              "SELECT rowid AS backup_cursor,* FROM $table WHERE rowid > ? ${table == 'settings' ? "AND id != 'rollback'" : ''} ORDER BY rowid LIMIT 200",
+              variables: [Variable.withInt(cursor)],
+            )
+            .get();
+        if (rows.isEmpty) break;
+        for (final r in rows) {
           final data = Map<String, dynamic>.from(r.data);
+          cursor = data.remove('backup_cursor') as int;
           if (table == 'items' || table == 'sources') {
             data['payload'] = await Security.open(data['payload'], key);
           }
-          return data;
-        }),
+          if (portableFiles &&
+              table == 'settings' &&
+              (data['id'] as String).startsWith('file:')) {
+            final payload = decodeMap(data['payload']);
+            data['payload'] = jsonEncode({
+              'portable': await Security.open(payload['encrypted'], key),
+            });
+          }
+          if (!first) result.write(',');
+          first = false;
+          result.write(jsonEncode(data));
+          if (result.length > backupExpandedLimit) {
+            throw const FormatException(
+              'Library exceeds the 512 MB backup safety limit.',
+            );
+          }
+        }
+        await Future<void>.delayed(Duration.zero);
+      }
+      result.write(']');
+    }
+    result.write('}');
+    return result.toString();
+  });
+
+  Future<void> importData(String raw, {bool portableFiles = false}) async {
+    if (raw.length > backupExpandedLimit) {
+      throw const FormatException(
+        'Library exceeds the 512 MB backup safety limit.',
       );
     }
-    return jsonEncode(result);
-  }
-
-  Future<void> importData(String raw) async {
     final data = decodeMap(raw);
     if (data['version'] != 1) {
       throw const FormatException('Unsupported database version.');
@@ -814,6 +857,14 @@ class LibraryStore {
             in (table == 'channel_order' ? data[table] ?? [] : data[table])
                 as List) {
           final row = Map<String, dynamic>.from(value);
+          if (portableFiles &&
+              table == 'settings' &&
+              (row['id'] as String).startsWith('file:')) {
+            final payload = decodeMap(row['payload']);
+            row['payload'] = jsonEncode({
+              'encrypted': await Security.seal(payload['portable'], key),
+            });
+          }
           if (table == 'sources') Source.fromJson(decodeMap(row['payload']));
           if (table == 'items') MediaItem.fromJson(decodeMap(row['payload']));
           if (table == 'programmes') {

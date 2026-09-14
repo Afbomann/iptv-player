@@ -141,9 +141,11 @@ class _TrackPickerState extends State<TrackPicker> {
                                     ),
                                     title: Text(track.label),
                                     trailing: track.selected
-                                        ? const Icon(
+                                        ? Icon(
                                             Icons.check,
-                                            color: limeColor,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.primary,
                                           )
                                         : null,
                                     onTap: busy ? null : () => select(track),

@@ -34,6 +34,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   web: ^1.1.1
 dev_dependencies:
+  image: ^4.10.1
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
@@ -41,6 +42,8 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/branding/lumen-icon.png
+    - assets/branding/lumen-banner.png
     - assets/pairing/
   fonts:
     - family: Manrope

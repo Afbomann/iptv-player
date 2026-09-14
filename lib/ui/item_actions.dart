@@ -90,7 +90,7 @@ Future<void> itemActions(
                           .map(
                             (e) => DropdownMenuItem(
                               value: e.name,
-                              child: Text(e.name.toUpperCase()),
+                              child: Text(e.label),
                             ),
                           )
                           .toList(),

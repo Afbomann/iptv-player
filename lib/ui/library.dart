@@ -43,10 +43,12 @@ class HomePage extends ConsumerWidget {
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
-            gradient: const LinearGradient(
+            gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xff3e5235), Color(0xff243628), Color(0xff19251e)],
+              colors: [Theme.of(context).colorScheme.primaryContainer,
+                Theme.of(context).colorScheme.surfaceContainerHigh,
+                Theme.of(context).colorScheme.surfaceContainer],
             ),
           ),
           child: Stack(
@@ -60,7 +62,9 @@ class HomePage extends ConsumerWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: limeColor.withValues(alpha: .08),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: .08),
                       width: 50,
                     ),
                   ),
@@ -81,7 +85,7 @@ class HomePage extends ConsumerWidget {
                             ? 39
                             : 56,
                         height: 1.02,
-                        color: const Color(0xffeff3e3),
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -89,8 +93,8 @@ class HomePage extends ConsumerWidget {
                       app.sources.isEmpty
                           ? 'Bring your own playlist. Make this space yours.'
                           : 'Welcome back, ${profile.name}. There’s always something on.',
-                      style: const TextStyle(
-                        color: Color(0xffc1cdb9),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         height: 1.6,
                       ),
                     ),
@@ -134,7 +138,10 @@ class HomePage extends ConsumerWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.auto_awesome_outlined, color: limeColor),
+                Icon(
+                  Icons.auto_awesome_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(

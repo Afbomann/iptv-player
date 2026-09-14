@@ -197,7 +197,9 @@ class _LiveCategoriesPageState extends ConsumerState<LiveCategoriesPage> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       selected: chosen,
-                      selectedTileColor: limeColor.withValues(alpha: .12),
+                      selectedTileColor: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: .12),
                       leading: Icon(
                         entry.favorite ? Icons.star_outline : Icons.live_tv,
                         size: 22,
@@ -213,7 +215,7 @@ class _LiveCategoriesPageState extends ConsumerState<LiveCategoriesPage> {
                                     ? Icons.star
                                     : Icons.star_border,
                                 color: isFavorite(title)
-                                    ? limeColor
+                                    ? Theme.of(context).colorScheme.primary
                                     : mutedColor,
                               ),
                               onPressed: savingFavorite

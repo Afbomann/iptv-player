@@ -15,6 +15,7 @@ class RecordingService {
   final recorder = StreamRecorder();
   Timer? timer;
   bool checking = false;
+  bool suspended = false;
   final active = <String>{};
   Future<void> initialize() async {
     for (final job in await store.recordings()) {
@@ -80,7 +81,7 @@ class RecordingService {
   }
 
   Future<void> tick() async {
-    if (checking || !PlaybackCapabilities.current.recording) return;
+    if (checking || suspended || !PlaybackCapabilities.current.recording) return;
     checking = true;
     try {
       final now = DateTime.now().millisecondsSinceEpoch;

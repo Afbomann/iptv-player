@@ -219,7 +219,7 @@ class _RecordingsPageState extends ConsumerState<RecordingsPage> {
                           : Icons.video_file_outlined,
                       color: j['status'] == 'recording'
                           ? Colors.redAccent
-                          : limeColor,
+                          : Theme.of(context).colorScheme.primary,
                     ),
                     title: Text(j['title']),
                     subtitle: Text(

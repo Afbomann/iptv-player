@@ -5,6 +5,22 @@ import 'package:lumen_iptv/core/security.dart';
 import 'package:lumen_iptv/core/updates.dart';
 
 void main() {
+  test('Legacy uncompressed backups remain readable', () async {
+    final salt = Security.randomBytes(16);
+    final key = await Security.derive('backup passphrase', salt);
+    final archive = jsonEncode({
+      'format': 'lumen-backup',
+      'version': 1,
+      'kdf': 'pbkdf2-sha256',
+      'iterations': 600000,
+      'salt': base64Encode(salt),
+      'data': await Security.seal('{"version":1}', key),
+    });
+    expect(
+      await Security.restore(archive, 'backup passphrase'),
+      '{"version":1}',
+    );
+  });
   test(
     'PINs preserve leading zeroes, use salted hashes, and validate length',
     () async {
@@ -34,6 +50,7 @@ void main() {
         'backup passphrase',
       );
       expect(archive, isNot(contains('provider password')));
+      expect(jsonDecode(archive)['version'], 2);
       expect(
         await Security.restore(archive, 'backup passphrase'),
         contains('provider password'),

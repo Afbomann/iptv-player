@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 import '../core/models.dart';
 
-enum EngineKind { automatic, native, mpv, vlc, browser }
+enum EngineKind { automatic, native, mpv, vlc, browser, mpvSoftware }
+
+extension EngineLabel on EngineKind {
+  String get label => this == EngineKind.mpvSoftware
+      ? 'MPV (software decoding)'
+      : name.toUpperCase();
+}
 
 class PlaybackTrack {
   const PlaybackTrack(

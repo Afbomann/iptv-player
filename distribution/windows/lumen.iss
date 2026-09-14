@@ -23,6 +23,7 @@ OutputBaseFilename=lumen-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\..\windows\runner\resources\app_icon.ico
 CloseApplications=yes
 CloseApplicationsFilter=lumen_iptv.exe
 UninstallDisplayIcon={app}\lumen_iptv.exe

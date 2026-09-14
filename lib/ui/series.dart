@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'artwork.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/controller.dart';
 import '../core/models.dart';
@@ -60,9 +61,12 @@ class _SeriesPageState extends ConsumerState<SeriesPage> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xff344b32), Color(0xff102019)],
+                colors: [
+                  Theme.of(context).colorScheme.primaryContainer,
+                  Theme.of(context).colorScheme.surfaceContainer,
+                ],
               ),
             ),
             child: Row(
@@ -74,19 +78,26 @@ class _SeriesPageState extends ConsumerState<SeriesPage> {
                     width: MediaQuery.sizeOf(context).width < 600 ? 80 : 120,
                     height: MediaQuery.sizeOf(context).width < 600 ? 120 : 180,
                     child: widget.series.logo.startsWith('http')
-                        ? Image.network(
-                            widget.series.logo,
+                        ? Image(
+                            image: boundedArtwork(
+                              widget.series.logo,
+                              width: 360,
+                              height: 540,
+                            ),
                             semanticLabel: '${widget.series.name} artwork',
                             fit: BoxFit.cover,
-                            cacheWidth: 360,
-                            errorBuilder: (_, _, _) => const ColoredBox(
-                              color: Color(0xff243628),
-                              child: Icon(Icons.movie_outlined, size: 40),
+                            errorBuilder: (_, _, _) => ColoredBox(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHigh,
+                              child: const Icon(Icons.movie_outlined, size: 40),
                             ),
                           )
-                        : const ColoredBox(
-                            color: Color(0xff243628),
-                            child: Icon(Icons.movie_outlined, size: 40),
+                        : ColoredBox(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHigh,
+                            child: const Icon(Icons.movie_outlined, size: 40),
                           ),
                   ),
                 ),
@@ -183,9 +194,9 @@ class _SeriesPageState extends ConsumerState<SeriesPage> {
                                 vertical: 14,
                               ),
                               leading: CircleAvatar(
-                                backgroundColor: limeColor.withValues(
-                                  alpha: .12,
-                                ),
+                                backgroundColor: Theme.of(
+                                  context,
+                                ).colorScheme.primary.withValues(alpha: .12),
                                 child: Text(
                                   '${episode.episode > 0 ? episode.episode : i + 1}',
                                 ),
@@ -237,7 +248,7 @@ class _SeriesPageState extends ConsumerState<SeriesPage> {
                                 complete
                                     ? Icons.replay
                                     : Icons.play_circle_outline,
-                                color: limeColor,
+                                color: Theme.of(context).colorScheme.primary,
                               ),
                               onTap: () async {
                                 await openMedia(context, episode);

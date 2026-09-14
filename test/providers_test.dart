@@ -6,6 +6,80 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('Blank Xtream EPG uses xmltv endpoint and accepts standard DTD', () async {
+    final now = DateTime.now().toUtc();
+    String stamp(DateTime value) => value
+        .toIso8601String()
+        .substring(0, 19)
+        .replaceAll(RegExp('[-:T]'), '');
+    Uri? requested;
+    final provider = ProviderClient(
+      client: MockClient((request) async {
+        requested = request.url;
+        return http.Response(
+          '<?xml version="1.0"?><!DOCTYPE tv SYSTEM "https://example.test/xmltv.dtd"><tv>'
+          '<programme channel="news" start="${stamp(now.subtract(const Duration(hours: 1)))}" stop="${stamp(now.add(const Duration(hours: 1)))}"><title>News</title></programme></tv>',
+          200,
+        );
+      }),
+    );
+    addTearDown(provider.close);
+    final programmes = await provider.epg(
+      const Source(
+        id: 's',
+        name: 'Test',
+        kind: SourceKind.xtream,
+        url: 'https://provider.test/panel/player_api.php',
+        username: 'user',
+        password: 'pass',
+        epgUrl: '   ',
+      ),
+    );
+    expect(requested!.path, '/panel/xmltv.php');
+    expect(requested!.queryParameters, {
+      'username': 'user',
+      'password': 'pass',
+    });
+    expect(programmes.single.title, 'News');
+  });
+  test(
+    'XMLTV still rejects custom entity declarations and internal subsets',
+    () {
+      expect(
+        () => parseXmltv({
+          'source': 's',
+          'bytes': utf8.encode(
+            '<!DOCTYPE tv [<!ENTITY x SYSTEM "file:///secret">]><tv/>',
+          ),
+          'from': 0,
+          'to': 9999999999999,
+        }),
+        throwsFormatException,
+      );
+    },
+  );
+  test('Xtream stream URLs discard API query parameters', () {
+    final provider = ProviderClient();
+    addTearDown(provider.close);
+    final result = Uri.parse(
+      provider.streamUrl(
+        const Source(
+          id: 's',
+          name: 'Test',
+          kind: SourceKind.xtream,
+          url:
+              'https://provider.test/player_api.php?username=old&password=old&action=test',
+          username: 'user',
+          password: 'pass',
+        ),
+        'live',
+        '42',
+        'ts',
+      ),
+    );
+    expect(result.path, '/live/user/pass/42.ts');
+    expect(result.query, isEmpty);
+  });
   test('M3U preserves host and query stream identities across auth rotation', () {
     List<MediaItem> parse(String token) => parseM3u({
       'source': 'source',
@@ -152,7 +226,7 @@ https://provider.test/live/sport.ts
         xmltvTime('20261025013000 +0100'),
         DateTime.utc(2026, 10, 25, 0, 30),
       );
-      expect(() => xmltvTime('20261025013000'), throwsFormatException);
+      expect(xmltvTime('20261025013000'), DateTime.utc(2026, 10, 25, 1, 30));
     },
   );
   test('XMLTV scopes channel IDs and filters retention window', () {

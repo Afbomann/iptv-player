@@ -199,9 +199,9 @@ class _VideoStageState extends State<VideoStage> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.error_outline,
-                              color: limeColor,
+                              color: Theme.of(context).colorScheme.primary,
                               size: 36,
                             ),
                             const SizedBox(height: 16),
@@ -264,12 +264,14 @@ class _VideoStageState extends State<VideoStage> {
                                     ),
                                   ),
                                   if (widget.item.kind == MediaKind.live)
-                                    const Padding(
-                                      padding: EdgeInsets.only(left: 12),
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 12),
                                       child: Text(
                                         '● LIVE',
                                         style: TextStyle(
-                                          color: limeColor,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary,
                                           fontSize: 11,
                                         ),
                                       ),
@@ -371,7 +373,7 @@ class _VideoStageState extends State<VideoStage> {
                                       Expanded(
                                         child: Text(
                                           widget.item.kind == MediaKind.live
-                                              ? engine.kind.name.toUpperCase()
+                                              ? engine.kind.label
                                               : '${time(engine.position)} / ${time(engine.duration)}',
                                           style: const TextStyle(
                                             color: Colors.white70,
@@ -451,7 +453,7 @@ class _VideoStageState extends State<VideoStage> {
                                               PopupMenuItem(
                                                 value: kind.name,
                                                 child: Text(
-                                                  'Engine · ${kind.name}',
+                                                  'Engine · ${kind.label}',
                                                 ),
                                               ),
                                             if (PlaybackCapabilities

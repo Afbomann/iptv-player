@@ -4,12 +4,14 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter/services.dart';
 import '../core/security.dart';
+import 'backup_transport_io.dart';
 
 class PairingServer {
   PairingServer({this.loadAsset});
   final Future<String> Function(String)? loadAsset;
   HttpServer? _server;
   Timer? _expiry;
+  BackupTransport? _transfer;
   String url = '';
   bool used = false;
   Future<void> start(
@@ -32,17 +34,18 @@ class PairingServer {
     final keyBytes = Security.randomBytes(32);
     final key = SecretKey(keyBytes);
     final session = base64UrlEncode(Security.randomBytes(24));
-    _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
-    final origin = 'http://${addresses.first.address}:${_server!.port}';
-    url =
-        '$origin/#${Uri(queryParameters: {'session': session, 'key': base64Encode(keyBytes), if (transfer) 'mode': backup == null ? 'upload' : 'download'}).query}';
-    _expiry = Timer(const Duration(minutes: 5), close);
     final html = await (loadAsset ?? rootBundle.loadString)(
       'assets/pairing/index.html',
     );
     final js = await (loadAsset ?? rootBundle.loadString)(
       'assets/pairing/pairing.js',
     );
+    _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
+    final origin = 'http://${addresses.first.address}:${_server!.port}';
+    if (transfer) _transfer = BackupTransport(session, key, origin, backup);
+    url =
+        '$origin/#${Uri(queryParameters: {'session': session, 'key': base64Encode(keyBytes), if (transfer) 'mode': backup == null ? 'upload' : 'download'}).query}';
+    _expiry = Timer(Duration(minutes: transfer ? 30 : 5), close);
     _server!.listen((request) async {
       Map<String, dynamic>? pending;
       try {
@@ -68,39 +71,18 @@ class PairingServer {
             charset: 'utf-8',
           );
           request.response.write(js);
-        } else if (request.method == 'POST' &&
-            request.uri.path == '/download' &&
-            backup != null &&
-            !used) {
-          if (request.headers.value('origin') != origin ||
-              request.contentLength < 0 ||
-              request.contentLength > 1024) {
-            request.response.statusCode = 403;
-            return;
-          }
-          final body = jsonDecode(
-            await utf8.decoder
-                .bind(request)
-                .join()
-                .timeout(const Duration(seconds: 10)),
-          );
-          if (body['session'] != session) {
-            request.response.statusCode = 403;
-            return;
-          }
-          if (used) {
-            request.response.statusCode = 410;
-            return;
-          }
-          used = true;
-          request.response.headers.contentType = ContentType.json;
-          request.response.write(await Security.seal(backup, key));
+        } else if (transfer &&
+            request.method == 'POST' &&
+            request.uri.path.startsWith('/backup/')) {
+          pending = await _transfer!.handle(request);
+          used = _transfer!.finished;
         } else if (request.method == 'POST' &&
             request.uri.path == '/submit' &&
+            !transfer &&
             !used) {
           if (request.headers.value('origin') != origin ||
               request.contentLength < 0 ||
-              request.contentLength > (transfer ? 96 * 1024 * 1024 : 16384)) {
+              request.contentLength > 16384) {
             request.response.statusCode = 403;
             return;
           }
@@ -117,10 +99,8 @@ class PairingServer {
             await Security.open(jsonEncode(envelope), key),
           );
           if (payload is! Map ||
-              (transfer
-                  ? payload['backup'] is! String
-                  : (payload['url'] is! String ||
-                        payload['name'] is! String))) {
+              payload['url'] is! String ||
+              payload['name'] is! String) {
             request.response.statusCode = 400;
             return;
           }
@@ -137,8 +117,18 @@ class PairingServer {
       } catch (_) {
         request.response.statusCode = 400;
       } finally {
-        await request.response.close();
-        if (pending != null) onSubmit(pending);
+        try {
+          await request.response.close();
+        } catch (_) {
+          /* Peer closed or session cancelled. */
+        }
+        if (pending != null) {
+          try {
+            onSubmit(pending);
+          } catch (_) {
+            /* A dismissed dialog must not crash the HTTP listener. */
+          }
+        }
       }
     });
   }
@@ -146,6 +136,7 @@ class PairingServer {
   Future<void> close() async {
     _expiry?.cancel();
     await _server?.close(force: true);
+    await _transfer?.close();
     _server = null;
   }
 }

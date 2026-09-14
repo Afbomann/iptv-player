@@ -12,7 +12,19 @@
             <rect key="frame" x="0.0" y="0.0" width="1920" height="1080"/>
             <autoresizingMask key="autoresizingMask"
                               widthSizable="YES" heightSizable="YES"/>
-            <color key="backgroundColor" systemColor="systemBackgroundColor"/>
+            <subviews>
+              <imageView opaque="NO" contentMode="scaleAspectFit" image="LaunchImage" translatesAutoresizingMaskIntoConstraints="NO" id="lumen-launch">
+                <constraints>
+                  <constraint firstAttribute="width" constant="960" id="lumen-width"/>
+                  <constraint firstAttribute="height" constant="540" id="lumen-height"/>
+                </constraints>
+              </imageView>
+            </subviews>
+            <color key="backgroundColor" red="0.062745" green="0.090196" blue="0.07451" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+            <constraints>
+              <constraint firstItem="lumen-launch" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="lumen-x"/>
+              <constraint firstItem="lumen-launch" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="lumen-y"/>
+            </constraints>
           </view>
         </viewController>
         <placeholder placeholderIdentifier="IBFirstResponder"
@@ -22,4 +34,5 @@
       <point key="canvasLocation" x="0" y="0"/>
     </scene>
   </scenes>
+  <resources><image name="LaunchImage" width="960" height="540"/></resources>
 </document>

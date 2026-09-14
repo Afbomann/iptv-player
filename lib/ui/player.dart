@@ -85,7 +85,9 @@ class _PlayerPageState extends State<PlayerPage> {
               itemBuilder: (context, i) => Container(
                 decoration: BoxDecoration(
                   border: Border.all(
-                    color: audible == i ? limeColor : Colors.white24,
+                    color: audible == i
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.white24,
                     width: 2,
                   ),
                 ),

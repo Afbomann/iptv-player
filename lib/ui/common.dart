@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'artwork.dart';
 import '../core/models.dart';
 
 const canvasColor = Color(0xff101713);
@@ -15,6 +16,9 @@ ThemeData lumenTheme({
     seedColor: accent,
     brightness: light ? Brightness.light : Brightness.dark,
     primary: accent,
+    onPrimary: ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
+        ? Colors.white
+        : const Color(0xff101713),
     surface: light ? const Color(0xfff3f3e9) : canvasColor,
   );
   return ThemeData(
@@ -130,17 +134,14 @@ class Brand extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     mainAxisSize: MainAxisSize.min,
     children: [
-      Container(
-        width: small ? 30 : 38,
-        height: small ? 30 : 38,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Icon(
-          Icons.wb_twilight_rounded,
-          color: Color(0xff243120),
-          size: 24,
+      ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.asset(
+          'assets/branding/lumen-icon.png',
+          width: small ? 30 : 38,
+          height: small ? 30 : 38,
+          cacheWidth: 96,
+          excludeFromSemantics: true,
         ),
       ),
       const SizedBox(width: 12),
@@ -260,13 +261,8 @@ class MediaTile extends StatelessWidget {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [
-                          HSLColor.fromAHSL(
-                            1,
-                            (item.name.hashCode.abs() % 90 + 85).toDouble(),
-                            .18,
-                            .23,
-                          ).toColor(),
-                          const Color(0xff17241c),
+                          Theme.of(context).colorScheme.primaryContainer,
+                          Theme.of(context).colorScheme.surfaceContainerHigh,
                         ],
                       ),
                     ),
@@ -276,17 +272,16 @@ class MediaTile extends StatelessWidget {
                       padding: EdgeInsets.all(
                         item.kind == MediaKind.live ? 24 : 0,
                       ),
-                      child: Image.network(
-                        item.logo,
+                      child: Image(
+                        image: boundedArtwork(item.logo),
                         fit: item.kind == MediaKind.live
                             ? BoxFit.contain
                             : BoxFit.cover,
-                        cacheWidth: 480,
-                        errorBuilder: (_, _, _) => _monogram(),
+                        errorBuilder: (_, _, _) => _monogram(context),
                       ),
                     )
                   else
-                    _monogram(),
+                    _monogram(context),
                   Positioned(
                     left: 12,
                     top: 12,
@@ -364,13 +359,13 @@ class MediaTile extends StatelessWidget {
     );
   }
 
-  Widget _monogram() => Center(
+  Widget _monogram(BuildContext context) => Center(
     child: Text(
       item.name.isEmpty ? 'L' : item.name.substring(0, 1).toUpperCase(),
-      style: const TextStyle(
+      style: TextStyle(
         fontFamily: 'Newsreader',
         fontSize: 64,
-        color: Color(0xffcbd9bb),
+        color: Theme.of(context).colorScheme.onPrimaryContainer,
       ),
     ),
   );

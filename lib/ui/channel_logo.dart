@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'artwork.dart';
 
 /// A small, bounded logo slot; channel names provide the accessible label.
 class ChannelLogo extends StatelessWidget {
@@ -29,11 +30,17 @@ class ChannelLogo extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: valid
-            ? Image.network(
-                url.trim(),
+            ? Image(
+                image: boundedArtwork(
+                  url.trim(),
+                  width: (size * MediaQuery.devicePixelRatioOf(context))
+                      .ceil()
+                      .clamp(1, 256),
+                  height: (size * MediaQuery.devicePixelRatioOf(context))
+                      .ceil()
+                      .clamp(1, 256),
+                ),
                 fit: BoxFit.contain,
-                cacheWidth: (size * MediaQuery.devicePixelRatioOf(context))
-                    .ceil(),
                 frameBuilder: (_, child, frame, synchronous) =>
                     synchronous || frame != null ? child : fallback,
                 errorBuilder: (_, _, _) => fallback,

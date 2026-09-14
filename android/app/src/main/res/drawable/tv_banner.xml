@@ -1,6 +1,3 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item><shape><solid android:color="#19231d"/><size android:width="320dp" android:height="180dp"/></shape></item>
-    <item android:width="84dp" android:height="84dp" android:gravity="center">
-        <shape android:shape="oval"><solid android:color="#d5ed9c"/></shape>
-    </item>
+    <item android:drawable="@drawable/lumen_tv_banner" />
 </layer-list>
